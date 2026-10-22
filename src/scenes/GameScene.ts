@@ -1,16 +1,21 @@
 import Phaser from 'phaser';
-import { ATLAS, TILE } from '../config';
+import { TILE } from '../config';
 import { Sfx } from '../audio/Sfx';
 import { Player } from '../player/Player';
 import { TrainingDummy } from '../entities/TrainingDummy';
 import { Enemy } from '../entities/Enemy';
 import { Boss } from '../entities/Boss';
 import { HitStop } from '../combat/HitStop';
+import { setFxStyle } from '../combat/fxStyle';
 import { spawnCallout, spawnCounterBurst, spawnDamageNumber, spawnHitSpark, spawnParrySpark } from '../combat/hitEffects';
 import { createCharm, spawnTalismanBurst, TALISMAN_DAMAGE, TALISMAN_FUSE } from '../combat/talisman';
+import {
+  advanceArrow, ARROW_DAMAGE, ARROW_HIT_STOP, ARROW_POISE, ARROW_POWER,
+  arrowSpent, arrowTipRect, arrowTipX, createArrow, stickArrow, type Arrow,
+} from '../combat/arrows';
 import type { Attacker, Hittable, Strike } from '../combat/types';
-import { LEVEL_1, LEVEL_1_ARENA } from '../level/level1';
 import { buildLevel, type BuiltLevel } from '../level/buildLevel';
+import { getTheme, type Theme, type ThemeId } from '../themes';
 
 const KILL_HIT_STOP = 150;   // ms đứng hình ở nhát kết liễu: lâu hơn nhát thường để "ăn mừng"
 const PARRY_HIT_STOP = 130;  // đỡ hoàn hảo đứng hình lâu: khoảnh khắc "đã" nhất của cả hệ thống chiến đấu
@@ -19,6 +24,13 @@ const TALISMAN_HIT_STOP = 140;
 const COUNTER_HIT_STOP = 200;  // phản đòn đứng hình lâu nhất: phần thưởng lớn nhất
 const COUNTER_DAMAGE = 25;
 const TALISMAN_POISE = 20;     // bùa nổ cộng thanh choáng boss
+
+/** Dữ liệu truyền qua scene.start / scene.restart. */
+export interface GameSceneData {
+  theme?: ThemeId;
+  /** Chết trong trận boss => chơi lại ngay cửa đấu trường. */
+  checkpoint?: boolean;
+}
 
 /** Một lá bùa đang dán trên mục tiêu, chờ nổ. */
 interface StuckTalisman {
@@ -35,57 +47,76 @@ export class GameScene extends Phaser.Scene {
   player!: Player; // public: UIScene đọc trạng thái để hiển thị
   boss: Boss | null = null; // public: UIScene vẽ thanh máu boss
   bossStarted = false;
+  private theme!: Theme;
   private sfx?: Sfx;
   private level!: BuiltLevel;
   private hitStop!: HitStop;
   private dummies: TrainingDummy[] = [];
   private enemies: Enemy[] = [];
   private talismans: StuckTalisman[] = [];
+  private arrows: Arrow[] = [];
+  private lastArrowSwing = -1;   // mỗi lần ra chiêu chỉ bắn MỘT mũi tên, dù pha active kéo dài vài frame
   private hitThisSwing = new Set<Hittable>(); // mục tiêu đã trúng nhát chém hiện tại
   private lastSwingId = -1;
   private lastSafe = { x: 0, y: 0 }; // chỗ đứng an toàn gần nhất, để hồi sinh khi rơi xuống hố
   private restarting = false;
+  private clearAnnounced = false;
   private debugGraphics!: Phaser.GameObjects.Graphics;
   private showHitboxes = false;
   private hitboxKey!: Phaser.Input.Keyboard.Key;
   private restartKey!: Phaser.Input.Keyboard.Key;
   private fullscreenKey!: Phaser.Input.Keyboard.Key;
+  private menuKey!: Phaser.Input.Keyboard.Key;
 
   constructor() {
     super('GameScene');
   }
 
   /**
-   * `data` được truyền qua scene.restart(data). Chết trong trận boss => restart({ checkpoint: true })
-   * để xuất hiện ngay cửa đấu trường, không phải đi lại cả màn.
+   * `data` được truyền qua scene.start / scene.restart: chọn chế độ chơi (theme), và có hồi sinh ở checkpoint không.
+   * Chết trong trận boss => restart({ checkpoint: true }) để xuất hiện ngay cửa đấu trường, không phải đi lại cả màn.
    */
-  create(data: { checkpoint?: boolean } = {}) {
+  create(data: GameSceneData = {}) {
     // Restart chạy lại create() trên CÙNG object scene: field cũ vẫn còn => reset những gì cần
     this.dummies = [];
     this.enemies = [];
     this.talismans = [];
+    this.arrows = [];
+    this.lastArrowSwing = -1;
     this.hitThisSwing.clear();
     this.lastSwingId = -1;
     this.restarting = false;
+    this.clearAnnounced = false;
     this.bossStarted = false;
     this.boss = null;
     // Bấm R đúng lúc đang đứng hình thì physics/tween có thể còn bị pause
     this.physics.world.resume();
     this.tweens.resumeAll();
 
-    const level = buildLevel(this, LEVEL_1);
+    // Mọi thứ khác nhau giữa các chế độ chơi đều nằm trong theme: bản đồ, bộ gạch, nền, bộ da, hiệu ứng, chiêu đặc biệt
+    const theme = getTheme(data.theme);
+    this.theme = theme;
+    setFxStyle(this, theme.fx);
+
+    const level = buildLevel(this, theme.map, theme.tileset);
     this.level = level;
 
     // Thế giới rộng hơn màn hình: physics và camera đều phải biết kích thước thật.
     // Tắt va chạm mép DƯỚI của thế giới: rơi xuống hố là rơi mất, không còn đứng dưới đáy hố.
     this.physics.world.setBounds(0, 0, level.width, level.height);
     this.physics.world.setBoundsCollision(true, true, true, false);
-    this.createBackground(level);
+    theme.createBackground(this, level);
 
     this.sfx ??= new Sfx(this.sound); // field còn từ lần trước => chỉ tạo một lần
     this.hitStop = new HitStop(this);
-    const spawn = data.checkpoint ? { x: (LEVEL_1_ARENA.checkpointCol + 0.5) * TILE, y: level.height - 2 * TILE } : level.spawn;
-    this.player = new Player(this, spawn.x, spawn.y, { sfx: this.sfx, hitStop: this.hitStop });
+    const arena = theme.arena;
+    const spawn = data.checkpoint && arena ? { x: (arena.checkpointCol + 0.5) * TILE, y: level.height - 2 * TILE } : level.spawn;
+    this.player = new Player(this, spawn.x, spawn.y, {
+      sfx: this.sfx,
+      hitStop: this.hitStop,
+      look: theme.createPlayerLook(this, spawn.x, spawn.y),
+      special: theme.special,
+    });
     this.lastSafe = { ...spawn };
     this.physics.add.collider(this.player.hitbox, level.solids);
     this.physics.add.collider(
@@ -106,7 +137,12 @@ export class GameScene extends Phaser.Scene {
     }
 
     for (const spawn of level.enemySpawns) {
-      const enemy = new Enemy(this, spawn.x, spawn.y, { sfx: this.sfx, hitStop: this.hitStop, isGroundAt: level.isGroundAt });
+      const enemy = new Enemy(this, spawn.x, spawn.y, {
+        sfx: this.sfx,
+        hitStop: this.hitStop,
+        isGroundAt: level.isGroundAt,
+        look: theme.createEnemyLook(this, spawn.x, spawn.y),
+      });
       // Kẻ địch đứng được trên đất và cầu; không va chạm với người chơi (đi xuyên qua nhau được).
       // Giữ lại collider để xoá cùng kẻ địch khi nó chết.
       enemy.colliders.push(this.physics.add.collider(enemy.hitbox, level.solids), this.physics.add.collider(enemy.hitbox, level.oneWays));
@@ -123,6 +159,7 @@ export class GameScene extends Phaser.Scene {
     // - deadzone: người chơi đi trong khung giữa này thì camera đứng yên
     // - roundPixels: làm tròn vị trí khi vẽ => ảnh 1:1 không bị nhoè vì lệch nửa pixel
     const cam = this.cameras.main;
+    cam.setBackgroundColor(theme.backgroundColor);
     cam.setBounds(0, 0, level.width, level.height);
     cam.startFollow(this.player.hitbox, true, 0.1, 0.1);
     cam.setDeadzone(240, 160);
@@ -131,18 +168,31 @@ export class GameScene extends Phaser.Scene {
 
     this.debugGraphics = this.add.graphics().setDepth(1000);
 
-    // HUD nằm ở scene riêng chạy song song; restart GameScene thì UIScene vẫn giữ nguyên
-    if (!this.scene.isActive('UIScene')) this.scene.launch('UIScene');
+    // HUD nằm ở scene riêng chạy song song; restart GameScene thì UIScene vẫn giữ nguyên.
+    // Về màn chọn chế độ thì UIScene bị dừng => lần sau mở lại với đúng theme mới.
+    if (!this.scene.isActive('UIScene')) this.scene.launch('UIScene', { theme: theme.id });
 
     const keyboard = this.input.keyboard!;
     this.hitboxKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.H);
     this.restartKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.fullscreenKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
+    this.menuKey = keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+  }
+
+  /** Đã thắng màn chưa: màn có boss thì hạ boss, không có boss thì hạ hết kẻ địch. UIScene đọc để hiện chữ CHIẾN THẮNG. */
+  get cleared() {
+    if (this.boss) return this.boss.gone;
+    return this.level.enemySpawns.length > 0 && this.enemies.length === 0;
   }
 
   update(_time: number, delta: number) {
+    if (Phaser.Input.Keyboard.JustDown(this.menuKey)) {
+      this.scene.stop('UIScene');
+      this.scene.start('MenuScene');
+      return;
+    }
     if (Phaser.Input.Keyboard.JustDown(this.restartKey)) {
-      this.scene.restart({ checkpoint: false }); // R = chơi lại TỪ ĐẦU màn
+      this.scene.restart({ theme: this.theme.id, checkpoint: false } satisfies GameSceneData); // R = chơi lại TỪ ĐẦU màn
       return;
     }
     if (Phaser.Input.Keyboard.JustDown(this.hitboxKey)) {
@@ -166,8 +216,10 @@ export class GameScene extends Phaser.Scene {
       this.resolvePlayerAttack();
       this.resolveEnemyAttacks();
       this.updateTalismans(delta);
+      this.updateArrows(delta);
       this.updateHazards();
       this.removeFinishedEnemies();
+      this.checkCleared();
       this.checkPlayerDeath();
     }
 
@@ -192,6 +244,10 @@ export class GameScene extends Phaser.Scene {
       this.hitThisSwing.clear();
     }
 
+    if (strike.effect === 'arrow') {
+      this.fireArrow(strike);
+      return;
+    }
     const targets = this.hittables();
     if (strike.effect === 'talisman') {
       this.tryStickTalisman(strike, targets);
@@ -226,7 +282,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Mũi giáo của kẻ địch vs thân người chơi. Player tự quyết định kết quả (đỡ hoàn hảo / đỡ thường / trúng / trượt),
+   * Vũ khí của kẻ địch vs thân người chơi. Player tự quyết định kết quả (đỡ hoàn hảo / đỡ thường / trúng / trượt),
    * GameScene chỉ lo phần "diễn": mỗi kết quả một bộ hiệu ứng khác hẳn nhau để người chơi phân biệt bằng mắt và tai.
    */
   private resolveEnemyAttacks() {
@@ -239,14 +295,14 @@ export class GameScene extends Phaser.Scene {
       if (!Phaser.Geom.Rectangle.Overlaps(strike.rect, hurtbox)) continue;
 
       const result = this.player.receiveAttack(strike);
-      if (result === 'miss') continue; // đang lướt / vừa bị đánh: mũi giáo xuyên qua, vẫn còn hiệu lực
+      if (result === 'miss') continue; // đang lướt / vừa bị đánh: vũ khí xuyên qua, vẫn còn hiệu lực
       enemy.onStrikeConnected();
 
       const contact = Phaser.Geom.Rectangle.Intersection(strike.rect, hurtbox);
       const cam = this.cameras.main;
       switch (result) {
         case 'perfect': // KENG! Toé lửa mọi hướng, camera giật vào, đứng hình lâu, kẻ địch bị hất khựng
-          enemy.onParried(strike.direction > 0 ? -1 : 1); // bị hất NGƯỢC hướng nó vừa đâm tới
+          enemy.onParried(strike.direction > 0 ? -1 : 1); // bị hất NGƯỢC hướng nó vừa đánh tới
           spawnParrySpark(this, contact.centerX, contact.centerY);
           this.sfx?.parry();
           cam.shake(120, 0.004);
@@ -274,7 +330,7 @@ export class GameScene extends Phaser.Scene {
         }
         case 'guardBreak': // đỡ nhầm đòn đỏ: như trúng đòn, cộng tiếng vỡ + chữ để người chơi hiểu VÌ SAO
           spawnHitSpark(this, contact.centerX, contact.centerY, 1, strike.direction);
-          spawnCallout(this, hurtbox.centerX, hurtbox.top - 60, 'PHÁ THẾ!', '#2b2b2b');
+          spawnCallout(this, hurtbox.centerX, hurtbox.top - 60, 'PHÁ THẾ!');
           this.sfx?.guardBreak();
           this.sfx?.hurt();
           cam.shake(260, 0.012);
@@ -369,7 +425,64 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ===========================================================================
-  // Hố, chết, dọn dẹp
+  // Mũi tên: vật thể bay (projectile). Tự di chuyển mỗi frame, tự dò va chạm, không cần thân vật lý
+  // ===========================================================================
+
+  private fireArrow(strike: Strike) {
+    if (strike.swingId === this.lastArrowSwing) return;
+    this.lastArrowSwing = strike.swingId;
+    this.arrows.push(createArrow(this, strike.rect.centerX, strike.rect.centerY, strike.direction));
+    this.sfx?.bowShot();
+  }
+
+  /** Chạy SAU khi kiểm tra đứng hình: đang hit-stop thì mũi tên cũng đứng yên giữa không trung. */
+  private updateArrows(delta: number) {
+    this.arrows = this.arrows.filter((arrow) => {
+      const swept = advanceArrow(arrow, delta);
+      if (this.arrowHitsTarget(arrow, swept)) return false;
+
+      const tipX = arrowTipX(arrow);
+      const y = arrow.sprite.y;
+      if (this.level.isSolidAt(tipX, y)) {
+        // Mặt tường = cạnh của ô mà mũi tên vừa chui vào
+        const col = Math.floor(tipX / TILE);
+        stickArrow(this, arrow, arrow.dir > 0 ? col * TILE : (col + 1) * TILE);
+        spawnHitSpark(this, tipX, y, 0.15, arrow.dir > 0 ? -1 : 1);
+        this.sfx?.arrowThunk();
+        return false;
+      }
+      if (arrowSpent(arrow) || tipX < 0 || tipX > this.level.width) {
+        arrow.sprite.destroy();
+        return false;
+      }
+      return true;
+    });
+  }
+
+  /** Mũi tên trúng mục tiêu đầu tiên trên đường bay: như một nhát chém nhẹ, rồi biến mất. */
+  private arrowHitsTarget(arrow: Arrow, swept: Phaser.Geom.Rectangle) {
+    for (const target of this.hittables()) {
+      if (target.gone) continue;
+      const hurtbox = target.hurtbox;
+      if (!Phaser.Geom.Rectangle.Overlaps(swept, hurtbox)) continue;
+      // Mục tiêu không nhận đòn (đã chết, đang nằm sàn...) => mũi tên bay xuyên qua, tìm mục tiêu sau
+      if (!target.takeHit({ damage: ARROW_DAMAGE, power: ARROW_POWER, direction: arrow.dir, poiseDamage: ARROW_POISE })) continue;
+
+      const contact = Phaser.Geom.Rectangle.Intersection(swept, hurtbox);
+      const killed = target.isDead === true;
+      spawnHitSpark(this, contact.centerX, contact.centerY, ARROW_POWER, arrow.dir);
+      spawnDamageNumber(this, contact.centerX, hurtbox.top, target.lastDamageTaken ?? ARROW_DAMAGE, ARROW_POWER);
+      this.sfx?.impact(killed ? 1 : ARROW_POWER);
+      this.cameras.main.shake(killed ? 180 : 100, killed ? 0.007 : 0.004);
+      this.hitStop.trigger(killed ? KILL_HIT_STOP : ARROW_HIT_STOP);
+      arrow.sprite.destroy();
+      return true;
+    }
+    return false;
+  }
+
+  // ===========================================================================
+  // Hố, chết, dọn dẹp, thắng
   // ===========================================================================
 
   private updateHazards() {
@@ -402,6 +515,13 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /** Màn không có boss: hạ xong kẻ địch cuối cùng thì kêu nhạc thắng (boss tự lo phần này khi bị hạ). */
+  private checkCleared() {
+    if (this.boss || this.clearAnnounced || !this.cleared) return;
+    this.clearAnnounced = true;
+    this.sfx?.victory();
+  }
+
   /**
    * Chết: để người chơi thấy mình ngã một nhịp, rồi màn hình tối dần và chơi lại.
    * Đã vào trận boss => chơi lại ngay cửa đấu trường (checkpoint), không bắt đi lại cả màn.
@@ -409,11 +529,11 @@ export class GameScene extends Phaser.Scene {
   private checkPlayerDeath() {
     if (this.player.alive || this.restarting) return;
     this.restarting = true;
-    const checkpoint = this.bossStarted;
+    const data: GameSceneData = { theme: this.theme.id, checkpoint: this.bossStarted };
     this.time.delayedCall(900, () => {
       const cam = this.cameras.main;
       cam.fadeOut(500, 0, 0, 0);
-      cam.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.scene.restart({ checkpoint }));
+      cam.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.scene.restart(data));
     });
   }
 
@@ -427,14 +547,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   private checkBossTrigger() {
-    if (!this.boss || this.bossStarted) return;
-    if (this.player.body.center.x < LEVEL_1_ARENA.triggerCol * TILE) return;
+    const arena = this.theme.arena;
+    if (!this.boss || !arena || this.bossStarted) return;
+    if (this.player.body.center.x < arena.triggerCol * TILE) return;
     this.bossStarted = true;
 
     // Khoá camera vào đấu trường. Không đổi giới hạn camera đột ngột (camera sẽ giật cục):
     // thôi bám theo người chơi, LIA camera tới đấu trường, xong mới khoá giới hạn rồi bám lại.
-    const arenaX = LEVEL_1_ARENA.leftCol * TILE;
-    const arenaW = (LEVEL_1_ARENA.rightCol - LEVEL_1_ARENA.leftCol) * TILE;
+    const arenaX = arena.leftCol * TILE;
+    const arenaW = (arena.rightCol - arena.leftCol) * TILE;
     const cam = this.cameras.main;
     cam.stopFollow();
     const panX = Phaser.Math.Clamp(this.player.body.center.x, arenaX + cam.width / 2, arenaX + arenaW - cam.width / 2);
@@ -462,38 +583,13 @@ export class GameScene extends Phaser.Scene {
     }
     g.strokeRectShape(this.player.hurtbox);
 
-    g.lineStyle(3, 0xeb5757, 1); // đỏ: hitbox của đòn đang có hiệu lực
+    g.lineStyle(3, 0xeb5757, 1); // đỏ: hitbox của đòn đang có hiệu lực (kể cả mũi tên đang bay)
     g.fillStyle(0xeb5757, 0.35);
-    for (const strike of [this.player.activeStrike(), this.boss?.activeStrike() ?? null, ...this.enemies.map((e) => e.activeStrike())]) {
-      if (!strike) continue;
-      g.fillRectShape(strike.rect);
-      g.strokeRectShape(strike.rect);
-    }
-  }
-
-  /**
-   * Parallax: lớp càng xa càng trôi chậm khi camera di chuyển (scrollFactor < 1).
-   * Mắt người hiểu đó là chiều sâu => màn hình 2D trông có không gian.
-   * Lớp xa còn được làm mờ (alpha) để lùi hẳn ra sau, không tranh chú ý với màn chơi.
-   */
-  private createBackground(level: BuiltLevel) {
-    const viewW = this.scale.width;
-    // Lớp có scrollFactor s chỉ trôi s × quãng camera đi => chỉ cần phủ kín chừng này chiều ngang
-    const coverWidth = (s: number) => viewW + (level.width - viewW) * s;
-
-    // Mây: rất xa, trôi chậm nhất
-    const cloudFactor = 0.15;
-    for (let i = 0, x = 120; x < coverWidth(cloudFactor); i++, x += 520 + ((i * 173) % 260)) {
-      const frame = i % 2 === 0 ? 'background_cloudA' : 'background_cloudB';
-      const y = 140 + ((i * 97) % 220); // "ngẫu nhiên" nhưng cố định giữa các lần chạy
-      this.add.image(x, y, ATLAS, frame).setScrollFactor(cloudFactor).setAlpha(0.8).setDepth(-20);
-    }
-
-    // Hàng cây xa: trôi bằng nửa tốc độ camera; gốc cây khuất sau mặt đất
-    const treeFactor = 0.5;
-    for (let i = 0, x = 60; x < coverWidth(treeFactor); i++, x += 190 + ((i * 131) % 150)) {
-      const frame = i % 3 === 0 ? 'background_tree' : 'background_treeLarge';
-      this.add.image(x, 960, ATLAS, frame).setOrigin(0.5, 1).setScrollFactor(treeFactor).setAlpha(0.4).setDepth(-10);
+    const strikes = [this.player.activeStrike(), this.boss?.activeStrike() ?? null, ...this.enemies.map((e) => e.activeStrike())];
+    const rects = [...strikes.flatMap((s) => (s ? [s.rect] : [])), ...this.arrows.map(arrowTipRect)];
+    for (const rect of rects) {
+      g.fillRectShape(rect);
+      g.strokeRectShape(rect);
     }
   }
 

@@ -1,23 +1,23 @@
 import Phaser from 'phaser';
-import { ATLAS, TILE } from '../config';
+import { TILE } from '../config';
 import { mergeCells } from './mergeCells';
 
-type TileKind = 'solid' | 'oneWay' | 'decor';
+export type TileKind = 'solid' | 'oneWay' | 'decor';
 
-/** Ký tự trên bản đồ => loại ô + frame trong atlas. */
-const LEGEND: Record<string, { kind: TileKind; frame: string }> = {
-  '#': { kind: 'solid', frame: 'tile' }, // đất; ô nào lộ mặt trên thì đổi sang 'tile_top'
-  B: { kind: 'solid', frame: 'tile_brick' },
-  C: { kind: 'solid', frame: 'tile_crate' },
-  '=': { kind: 'oneWay', frame: 'tile_bridge' },
-  b: { kind: 'decor', frame: 'tile_bushHalf' },
-  f: { kind: 'decor', frame: 'tile_fenceHigh' },
-  T: { kind: 'decor', frame: 'tile_tree' },
-  F: { kind: 'decor', frame: 'tile_flag' },
-};
-
-/** Tấm ván cầu chỉ dày ~46px ở phần trên ô => vùng va chạm cũng chỉ mỏng như vậy. */
-const ONE_WAY_THICKNESS = 40;
+/**
+ * Bộ gạch của một chế độ chơi: ký tự trên bản đồ => loại ô + frame trong texture.
+ * Cùng một bản đồ chữ dựng được bằng nhiều bộ gạch khác nhau (Scribble, Pixel...).
+ */
+export interface Tileset {
+  texture: string;
+  /** Phóng to bao nhiêu lần để mỗi ô thành TILE × TILE: atlas Scribble 128px = 1, pixel art 16px = 8. */
+  scale: number;
+  legend: Record<string, { kind: TileKind; frame: string }>;
+  /** Ô đất ('#') lộ mặt trên thì dùng frame này (mặt cỏ, viền mặt đất). */
+  groundTop: string;
+  /** Độ dày vùng va chạm của cầu một chiều (px): bằng độ dày tấm ván trong hình. */
+  oneWayThickness: number;
+}
 
 const DEPTH_DECOR = 5;
 const DEPTH_TILES = 10;
@@ -43,11 +43,11 @@ export interface BuiltLevel {
 
 /**
  * Dựng màn chơi từ lưới ký tự. Hai việc tách riêng:
- * 1. HÌNH: mỗi ô một ảnh từ atlas.
+ * 1. HÌNH: mỗi ô một ảnh từ bộ gạch.
  * 2. VA CHẠM: gộp các ô đặc liền nhau thành ít hình chữ nhật lớn (vô hình).
  *    Ít vật thể hơn => nhanh hơn, và nhân vật không bị "vấp" ở khe giữa hai ô cạnh nhau.
  */
-export function buildLevel(scene: Phaser.Scene, map: string[]): BuiltLevel {
+export function buildLevel(scene: Phaser.Scene, map: string[], tileset: Tileset): BuiltLevel {
   const rows = map.length;
   const cols = map[0].length;
   map.forEach((line, r) => {
@@ -67,7 +67,7 @@ export function buildLevel(scene: Phaser.Scene, map: string[]): BuiltLevel {
     oneWayCells.push([]);
     for (let c = 0; c < cols; c++) {
       const ch = at(c, r);
-      const def = LEGEND[ch];
+      const def = tileset.legend[ch];
       solidCells[r].push(def?.kind === 'solid');
       oneWayCells[r].push(def?.kind === 'oneWay');
 
@@ -82,12 +82,12 @@ export function buildLevel(scene: Phaser.Scene, map: string[]): BuiltLevel {
 
       if (def.kind === 'decor') {
         // Đồ trang trí "đứng" trên đáy ô (gốc ở chân), vẽ sau lưng nhân vật
-        scene.add.image(c * TILE + TILE / 2, (r + 1) * TILE + 2, ATLAS, def.frame).setOrigin(0.5, 1).setDepth(DEPTH_DECOR);
+        scene.add.image(c * TILE + TILE / 2, (r + 1) * TILE + 2, tileset.texture, def.frame).setOrigin(0.5, 1).setScale(tileset.scale).setDepth(DEPTH_DECOR);
         continue;
       }
       // Autotile đơn giản: ô đất không có đất phía trên => đây là mặt đất => dùng hình có viền mặt
-      const frame = ch === '#' && at(c, r - 1) !== '#' ? 'tile_top' : def.frame;
-      scene.add.image(c * TILE + TILE / 2, r * TILE + TILE / 2, ATLAS, frame).setDepth(DEPTH_TILES);
+      const frame = ch === '#' && at(c, r - 1) !== '#' ? tileset.groundTop : def.frame;
+      scene.add.image(c * TILE + TILE / 2, r * TILE + TILE / 2, tileset.texture, frame).setScale(tileset.scale).setDepth(DEPTH_TILES);
     }
   }
 
@@ -99,7 +99,8 @@ export function buildLevel(scene: Phaser.Scene, map: string[]): BuiltLevel {
 
   const oneWays = scene.physics.add.staticGroup();
   for (const { col, row, w } of mergeCells(oneWayCells, false)) {
-    const zone = scene.add.zone((col + w / 2) * TILE, row * TILE + ONE_WAY_THICKNESS / 2, w * TILE, ONE_WAY_THICKNESS);
+    const thickness = tileset.oneWayThickness;
+    const zone = scene.add.zone((col + w / 2) * TILE, row * TILE + thickness / 2, w * TILE, thickness);
     oneWays.add(zone);
     // Cầu một chiều: chỉ chặn khi đáp xuống từ phía trên.
     // Tắt va chạm mặt dưới và hai bên => nhảy từ dưới lên hay đi ngang đều xuyên qua.

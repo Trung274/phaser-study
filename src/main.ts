@@ -2,6 +2,7 @@ import './style.css';
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH, GRAVITY } from './config';
 import { PreloadScene } from './scenes/PreloadScene';
+import { MenuScene } from './scenes/MenuScene';
 import { GameScene } from './scenes/GameScene';
 import { UIScene } from './scenes/UIScene';
 
@@ -9,7 +10,7 @@ const game = new Phaser.Game({
   type: Phaser.AUTO, // Phaser tự chọn WebGL, máy không hỗ trợ thì dùng Canvas
   width: GAME_WIDTH,
   height: GAME_HEIGHT,
-  backgroundColor: '#e4e2dd', // màu giấy: hợp nét vẽ đen trắng của bộ Scribble
+  backgroundColor: '#1b1a22', // màu nền canvas; mỗi chế độ chơi tự đặt màu nền camera riêng
   parent: 'app', // gắn canvas vào <div id="app"> trong index.html
   scale: {
     // Game vẫn "nghĩ" mình rộng 1920×1080 (mọi toạ độ giữ nguyên),
@@ -24,8 +25,8 @@ const game = new Phaser.Game({
       debug: false, // bấm H trong game để bật/tắt khung va chạm
     },
   },
-  // Thứ tự trong mảng = thứ tự vẽ: UIScene đứng sau nên luôn vẽ đè lên GameScene
-  scene: [PreloadScene, GameScene, UIScene],
+  // Scene đầu mảng tự chạy khi mở game. Thứ tự trong mảng = thứ tự vẽ: UIScene đứng sau nên luôn vẽ đè lên GameScene
+  scene: [PreloadScene, MenuScene, GameScene, UIScene],
 });
 
 // Chỉ khi chạy `npm run dev`: gắn game vào window để mở console (F12) gõ __game mà soi/sửa trạng thái.

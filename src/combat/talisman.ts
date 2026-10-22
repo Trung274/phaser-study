@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { ATLAS } from '../config';
+import { fxStyle } from './fxStyle';
 
 /** Bùa dán lên mục tiêu bao lâu thì nổ (ms). Đủ ngắn để không phải chờ, đủ dài để kịp thấy bùa nhấp nháy. */
 export const TALISMAN_FUSE = 450;
@@ -31,7 +31,7 @@ export function createCharm(scene: Phaser.Scene, x: number, y: number) {
 
 /** Bùa nổ: chớp vàng lớn + vòng xung kích + giấy vụn bay tung toé. */
 export function spawnTalismanBurst(scene: Phaser.Scene, x: number, y: number) {
-  const flash = scene.add.image(x, y, ATLAS, 'effect_blastLarge').setTint(0xffe7a0).setScale(1.1).setDepth(DEPTH);
+  const flash = scene.add.image(x, y, fxStyle(scene).texture, 'effect_blastLarge').setTint(0xffe7a0).setScale(1.1).setDepth(DEPTH);
   scene.tweens.add({ targets: flash, scale: 1.9, alpha: 0, duration: 320, ease: 'Quad.Out', onComplete: () => flash.destroy() });
 
   const ring = scene.add.graphics().setPosition(x, y).setDepth(DEPTH).setScale(1.5);

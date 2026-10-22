@@ -1,11 +1,13 @@
 import Phaser from 'phaser';
-import { ATLAS, GRAVITY, TILE } from '../config';
+import { GRAVITY, TILE } from '../config';
 import { StateMachine } from '../core/StateMachine';
 import { COMBO, type AttackDef } from '../combat/attacks';
-import { drawSlash } from '../combat/hitEffects';
+import { fxStyle } from '../combat/fxStyle';
+import type { SpecialDef } from '../combat/specials';
 import type { DefenseResult, HitInfo, Strike } from '../combat/types';
 import type { HitStop } from '../combat/HitStop';
 import type { Sfx } from '../audio/Sfx';
+import { PLAYER_DEPTH, type MoveTiming, type PlayerLook, type PlayerView } from '../looks/PlayerLook';
 
 // ============================================================================
 // Thông số di chuyển, tính theo ô gạch (TILE) để dễ hình dung khi thiết kế màn
@@ -29,7 +31,6 @@ const DASH_TIME = 160;                   // trong 0.16 giây: ngắn và gắt
 const DASH_SPEED = DASH_DISTANCE / (DASH_TIME / 1000);
 const DASH_COOLDOWN = 400;               // ms tính từ lúc bắt đầu lướt mới được lướt tiếp
 const AFTERIMAGE_INTERVAL = 25;          // ms giữa hai bóng mờ để lại phía sau
-const PLAYER_GREEN = 0x39d98d;           // màu thân nhân vật (lấy mẫu từ sprite)
 
 // --- Tấn công ---
 const ATTACK_BUFFER = 150;               // ms: bấm chém hơi sớm (đang lướt, đang đáp đất) vẫn được tính
@@ -42,6 +43,7 @@ const HURT_TIME = 350;                   // ms mất kiểm soát sau khi trúng
 const HURT_KNOCKBACK_X = 3.5 * TILE;     // bị hất ra sau...
 const HURT_KNOCKBACK_Y = 4 * TILE;       // ...và nảy lên
 const INVULN_TIME = 1000;                // ms miễn nhiễm sau khi trúng đòn (nhân vật nhấp nháy)
+const FLASH_TIME = 90;                   // ms chớp trắng khi trúng đòn
 
 // --- Đỡ đòn (parry) ---
 //   |-- PERFECT_WINDOW --|------ đỡ thường ------|   (hết PARRY_TIME mà không đỡ trúng gì => phải chờ cooldown)
@@ -50,49 +52,29 @@ const PERFECT_WINDOW = 160;              // ms đầu: đỡ hoàn hảo (gạt 
 const PARRY_WHIFF_COOLDOWN = 300;        // đỡ hụt => chờ chừng này mới đỡ lại được: chống bấm đỡ liên tục
 const PARRY_BUFFER = 80;                 // ms: bấm đỡ hơi sớm (đang thu kiếm) vẫn được tính, nhưng ngắn để giữ độ chính xác
 const BLOCK_PUSHBACK = 2.5 * TILE;       // đỡ thường bị đẩy lùi nhẹ
-const QI_GOLD = 0xf2c94c;                // màu Qi: kiếm loé vàng trong cửa sổ đỡ hoàn hảo
 
 // --- Phản đòn (counter): khắc chế ĐÒN ĐỎ ---
 //   |-- startup --|------ active: đâm kiếm lao tới ------|---- recovery ----|
 //   |<------- khung phản đòn: đòn ĐỎ chạm vào lúc này = PHẢN ĐÒN ------->|
 // Chỉ khắc chế đòn đỏ. Đòn thường đâm trúng lúc đang phản đòn thì vẫn trúng => phải nhìn màu mà chọn nút.
-const COUNTER_MOVE = { startup: 60, active: 150, recovery: 380 };
+const COUNTER_MOVE: MoveTiming = { startup: 60, active: 150, recovery: 380 };
 const COUNTER_LUNGE = (1.2 * TILE) / (150 / 1000); // lao 1.2 ô trong pha active
 const COUNTER_HITBOX = { x: 0, y: -115, w: 200, h: 80 };
 const COUNTER_WHIFF_COOLDOWN = 600;      // phản đòn hụt => phạt nặng hơn đỡ hụt
-const COUNTER_RED = 0xff5a5a;            // kiếm loé đỏ trong khung phản đòn
+const COUNTER_RED = 0xff5a5a;            // vệt tốc độ đỏ khi lao tới phản đòn
 
 // --- Nội thương: máu "tạm mất" khi đỡ thường ---
 const INTERNAL_HEAL_DELAY = 2500;        // ms không bị đánh thì nội thương bắt đầu lành
 const INTERNAL_HEAL_INTERVAL = 1200;     // rồi mỗi chừng này ms lành 1 tim
 
-// --- Qi + bùa ---
+// --- Qi: tích được khi đỡ hoàn hảo / phản đòn, tiêu vào chiêu đặc biệt ---
 export const PLAYER_MAX_QI = 3;
-const TALISMAN_MOVE = { startup: 120, active: 90, recovery: 260 }; // frame data của động tác dán bùa
-const TALISMAN_HITBOX = { x: 10, y: -125, w: 190, h: 110 };
 
-// --- Kiếm: sprite item_sword 128×129, mũi kiếm hướng lên, chuôi ở (64, 104) ---
-const SWORD_SCALE = 0.85;
-const SWORD_ORIGIN_Y = 104 / 129;
-const SHOULDER = { x: 8, y: -72 };       // vai tay cầm kiếm, tính từ chân, khi quay mặt sang phải
-const HAND_RADIUS = 38;                  // tay cách vai bao xa khi vung
-const SLASH_RADIUS = HAND_RADIUS + 100 * SWORD_SCALE + 8; // vệt chém ôm theo mũi kiếm
-/** Góc kiếm lúc nghỉ ở từng trạng thái (độ, hệ "quay mặt sang phải": 0 = trước, -90 = lên trời). */
-const SWORD_REST: Record<PlayerState, number> = {
-  idle: -60, run: -35, jump: -80, fall: -100, dash: 150, attack: 0, hurt: -130, dead: 100,
-  parry: -100, // dựng kiếm thẳng đứng chắn trước người
-  talisman: -50,
-  counter: 0,  // (tư thế phản đòn tính riêng theo pha, xem animate)
-};
-
-// Hình thân rộng 82px, cao 124px. Hitbox nhỏ hơn hình một chút => né sát vẫn không bị tính trúng
+// Thân hình rộng ~82px, cao ~124px. Hitbox nhỏ hơn hình một chút => né sát vẫn không bị tính trúng
 const HITBOX_W = 60;
 const HITBOX_H = 112;
-// Frame thân 128×128, phần có hình kết thúc ở y=124 => chân ở 125/128 chiều cao frame
-const BODY_FEET_ORIGIN_Y = 125 / 128;
-const DEPTH_PLAYER = 20;
 
-export type PlayerState = 'idle' | 'run' | 'jump' | 'fall' | 'dash' | 'attack' | 'parry' | 'talisman' | 'counter' | 'hurt' | 'dead';
+export type PlayerState = 'idle' | 'run' | 'jump' | 'fall' | 'dash' | 'attack' | 'parry' | 'special' | 'counter' | 'hurt' | 'dead';
 
 type Point = { x: number; y: number };
 
@@ -105,8 +87,17 @@ interface FrameInput {
   dashPressed: boolean;
   attackPressed: boolean;
   parryPressed: boolean;
-  talismanPressed: boolean;
+  specialPressed: boolean;
   counterPressed: boolean;
+}
+
+export interface PlayerDeps {
+  sfx: Sfx;
+  hitStop: HitStop;
+  /** Bộ da: toàn bộ phần nhìn thấy của nhân vật. */
+  look: PlayerLook;
+  /** Chiêu đặc biệt tốn Qi của chế độ chơi này (dán bùa, bắn cung...). */
+  special: SpecialDef;
 }
 
 /** Tiến `current` về `target`, mỗi lần không quá `maxDelta`. */
@@ -115,13 +106,11 @@ function moveTowards(current: number, target: number, maxDelta: number) {
   return current + Math.sign(target - current) * maxDelta;
 }
 
-const easeOutCubic = (t: number) => 1 - Math.pow(1 - Phaser.Math.Clamp(t, 0, 1), 3);
-
 /**
- * Nhân vật chính. Tách làm hai phần:
+ * Nhân vật chính, chỉ gồm LOGIC. Tách làm hai phần:
  * - hitbox: hình chữ nhật VÔ HÌNH mang thân vật lý. Va chạm chỉ dựa vào nó.
- * - visual: thân + hai bàn tay + kiếm lấy từ atlas. Bộ Scribble không có animation khung hình,
- *   nên chuyển động được "diễn" bằng code (procedural animation): thân nhún, tay vung, kiếm xoay.
+ * - look ("bộ da"): mọi thứ nhìn thấy. Player báo trạng thái mỗi frame và gọi bộ da đúng lúc
+ *   (vung kiếm, trúng đòn...), còn vẽ ra sao là việc của bộ da. Đổi bộ da = đổi hình, luật chơi giữ nguyên.
  * Logic điều khiển chia theo trạng thái bằng StateMachine.
  */
 export class Player {
@@ -136,27 +125,23 @@ export class Player {
   /** Số tim đang bị nội thương (nằm trong hp): lành dần theo thời gian, trúng đòn thật thì thành mất hẳn. */
   internalDamage = 0;
   qi = 0;
-  /** Tăng mỗi lần bấm dùng bùa mà không đủ Qi: HUD thấy số này đổi thì rung các ô Qi. */
+  /** Tăng mỗi lần bấm chiêu đặc biệt mà không đủ Qi: HUD thấy số này đổi thì rung các ô Qi. */
   qiDeniedCount = 0;
 
   private readonly scene: Phaser.Scene;
   private readonly sfx: Sfx;
   private readonly hitStop: HitStop;
+  private readonly look: PlayerLook;
+  private readonly special: SpecialDef;
   private readonly fsm: StateMachine<PlayerState>;
-  private readonly visual: Phaser.GameObjects.Container;
-  private readonly torso: Phaser.GameObjects.Image;
-  private readonly frontHand: Phaser.GameObjects.Image;
-  private readonly backHand: Phaser.GameObjects.Image;
-  private readonly sword: Phaser.GameObjects.Image;
 
   private input: FrameInput = {
     moveX: 0, down: false, jumpPressed: false, jumpReleased: false,
-    dashPressed: false, attackPressed: false, parryPressed: false, talismanPressed: false, counterPressed: false,
+    dashPressed: false, attackPressed: false, parryPressed: false, specialPressed: false, counterPressed: false,
   };
   private coyoteTimer = 0;
   private jumpBufferTimer = 0;
   private airVelocityY = 0;     // vận tốc rơi ngay trước khi chạm đất, để biết đáp mạnh hay nhẹ
-  private runPhase = 0;         // góc (radian) của chu kỳ bước chạy
   private dashCooldown = 0;
   private airDashAvailable = true; // trên không chỉ được lướt 1 lần, chạm đất mới hồi lại
   private dashDir: 1 | -1 = 1;
@@ -171,11 +156,8 @@ export class Player {
   private swingId = 0;
   private swingStarted = false;
   private lungeStopped = false;  // chém trúng thì thôi bước tới, không trượt xuyên qua mục tiêu
-  private swordAngle = SWORD_REST.idle;
-  private swingStartAngle = SWORD_REST.idle;
 
   private invulnTimer = 0;
-  private flashTimer = 0;
   private hitDirection: 1 | -1 = 1; // hướng đòn vừa trúng mình, để biết bị hất về phía nào
 
   private parryBufferTimer = 0;
@@ -193,28 +175,22 @@ export class Player {
   private readonly dashKeys: Phaser.Input.Keyboard.Key[];
   private readonly attackKeys: Phaser.Input.Keyboard.Key[];
   private readonly parryKeys: Phaser.Input.Keyboard.Key[];
-  private readonly talismanKeys: Phaser.Input.Keyboard.Key[];
+  private readonly specialKeys: Phaser.Input.Keyboard.Key[];
   private readonly counterKeys: Phaser.Input.Keyboard.Key[];
 
   /** (x, feetY) là vị trí CHÂN nhân vật. */
-  constructor(scene: Phaser.Scene, x: number, feetY: number, deps: { sfx: Sfx; hitStop: HitStop }) {
+  constructor(scene: Phaser.Scene, x: number, feetY: number, deps: PlayerDeps) {
     this.scene = scene;
     this.sfx = deps.sfx;
     this.hitStop = deps.hitStop;
+    this.look = deps.look;
+    this.special = deps.special;
 
     this.hitbox = scene.add.rectangle(x, feetY - HITBOX_H / 2, HITBOX_W, HITBOX_H).setVisible(false);
     scene.physics.add.existing(this.hitbox);
     this.body = this.hitbox.body as Phaser.Physics.Arcade.Body;
     this.body.setCollideWorldBounds(true);
     this.body.setMaxVelocityY(MAX_FALL_SPEED);
-
-    // Gốc của visual đặt ở CHÂN: co giãn khi tiếp đất thì chân vẫn bám sàn.
-    // Thứ tự trong container = thứ tự vẽ: tay sau, thân, kiếm, tay trước (tay nắm đè lên chuôi).
-    this.backHand = scene.add.image(-40, -52, ATLAS, 'character_handGreen');
-    this.torso = scene.add.image(0, 0, ATLAS, 'character_roundGreen').setOrigin(0.5, BODY_FEET_ORIGIN_Y);
-    this.sword = scene.add.image(46, -54, ATLAS, 'item_sword').setOrigin(0.5, SWORD_ORIGIN_Y).setScale(SWORD_SCALE);
-    this.frontHand = scene.add.image(46, -54, ATLAS, 'character_handGreen');
-    this.visual = scene.add.container(x, feetY, [this.backHand, this.torso, this.sword, this.frontHand]).setDepth(DEPTH_PLAYER);
 
     const keyboard = scene.input.keyboard!;
     const K = Phaser.Input.Keyboard.KeyCodes;
@@ -225,7 +201,7 @@ export class Player {
     this.dashKeys = [keyboard.addKey(K.SHIFT), keyboard.addKey(K.L)];
     this.attackKeys = [keyboard.addKey(K.J), keyboard.addKey(K.X)];
     this.parryKeys = [keyboard.addKey(K.K), keyboard.addKey(K.C)];
-    this.talismanKeys = [keyboard.addKey(K.I), keyboard.addKey(K.V)];
+    this.specialKeys = [keyboard.addKey(K.I), keyboard.addKey(K.V)];
     this.counterKeys = [keyboard.addKey(K.U), keyboard.addKey(K.Z)];
 
     // Mỗi trạng thái chỉ khai báo những móc nó cần
@@ -238,20 +214,20 @@ export class Player {
         dash: { enter: () => this.enterDash(), update: (d) => this.updateDash(d), exit: () => this.exitDash() },
         attack: { enter: () => this.enterAttack(), update: (d) => this.updateAttack(d), exit: () => this.exitAttack() },
         parry: { enter: () => this.enterParry(), update: (d) => this.updateParry(d), exit: () => this.exitParry() },
-        talisman: { enter: () => this.enterTalisman(), update: (d) => this.updateTalisman(d) },
+        special: { enter: () => this.enterSpecial(), update: (d) => this.updateSpecial(d) },
         counter: { enter: () => this.enterCounter(), update: (d) => this.updateCounter(d), exit: () => this.exitCounter() },
         hurt: { enter: () => this.enterHurt(), update: (d) => this.updateHurt(d) },
-        dead: { enter: () => this.enterDead() },
+        dead: { enter: () => this.enterDead(), update: (d) => this.updateDead(d) },
       },
       'idle',
     );
 
     // Physics ghi vị trí mới vào hitbox ở bước POST_UPDATE, SAU scene.update().
-    // Đặt visual theo hitbox cũng ở POST_UPDATE (đăng ký sau physics nên chạy sau) => không trễ 1 frame.
-    scene.events.on(Phaser.Scenes.Events.POST_UPDATE, this.animate, this);
+    // Cập nhật bộ da cũng ở POST_UPDATE (đăng ký sau physics nên chạy sau) => hình không trễ 1 frame so với thân.
+    scene.events.on(Phaser.Scenes.Events.POST_UPDATE, this.syncLook, this);
     // Restart scene thì gỡ listener, nếu không nó vẫn gọi vào object đã bị huỷ
     scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      scene.events.off(Phaser.Scenes.Events.POST_UPDATE, this.animate, this);
+      scene.events.off(Phaser.Scenes.Events.POST_UPDATE, this.syncLook, this);
     });
   }
 
@@ -282,25 +258,23 @@ export class Player {
     return this.fsm.current === 'attack' ? `${this.comboIndex + 1}/${COMBO.length} ${this.attack.name}` : '-';
   }
 
-  /** Đang trong cửa sổ đỡ hoàn hảo? (kiếm loé vàng) */
+  /** Đang trong cửa sổ đỡ hoàn hảo? (bộ da loé vàng) */
   get inPerfectWindow() {
     return this.fsm.current === 'parry' && this.fsm.timeInState <= PERFECT_WINDOW;
   }
 
-  /** Đang trong khung phản đòn? (kiếm loé đỏ) */
+  /** Đang trong khung phản đòn? (bộ da loé đỏ) */
   get inCounterWindow() {
     return this.fsm.current === 'counter' && this.fsm.timeInState < COUNTER_MOVE.startup + COUNTER_MOVE.active;
   }
 
-  /** Lưỡi kiếm (hoặc tay dán bùa) đang trong pha active thì trả về vùng tác động, ngoài ra trả về null. */
+  /** Lưỡi kiếm (hoặc chiêu đặc biệt) đang trong pha active thì trả về vùng tác động, ngoài ra trả về null. */
   activeStrike(): Strike | null {
     if (this.fsm.current === 'counter') {
       const t = this.fsm.timeInState;
       if (t < COUNTER_MOVE.startup || t >= COUNTER_MOVE.startup + COUNTER_MOVE.active) return null;
-      const hb = COUNTER_HITBOX;
-      const x = this.facing > 0 ? this.body.center.x + hb.x : this.body.center.x - hb.x - hb.w;
       return {
-        rect: new Phaser.Geom.Rectangle(x, this.body.bottom + hb.y, hb.w, hb.h),
+        rect: this.strikeRect(COUNTER_HITBOX),
         swingId: this.swingId,
         direction: this.facing,
         damage: 8,
@@ -308,30 +282,27 @@ export class Player {
         hitStop: 70,
       };
     }
-    if (this.fsm.current === 'talisman') {
+    if (this.fsm.current === 'special') {
+      // Chiêu đặc biệt không gây sát thương tại chỗ: GameScene đọc `effect` để dán bùa / bắn mũi tên
+      const sp = this.special;
       const t = this.fsm.timeInState;
-      if (t < TALISMAN_MOVE.startup || t >= TALISMAN_MOVE.startup + TALISMAN_MOVE.active) return null;
-      const hb = TALISMAN_HITBOX;
-      const x = this.facing > 0 ? this.body.center.x + hb.x : this.body.center.x - hb.x - hb.w;
+      if (t < sp.startup || t >= sp.startup + sp.active) return null;
       return {
-        rect: new Phaser.Geom.Rectangle(x, this.body.bottom + hb.y, hb.w, hb.h),
+        rect: this.strikeRect(sp.hitbox),
         swingId: this.swingId,
         direction: this.facing,
         damage: 0,
         power: 0.4,
         hitStop: 50,
-        effect: 'talisman',
+        effect: sp.kind,
       };
     }
     if (this.fsm.current !== 'attack') return null;
     const atk = this.attack;
     const t = this.fsm.timeInState;
     if (t < atk.startup || t >= atk.startup + atk.active) return null;
-
-    const hb = atk.hitbox;
-    const x = this.facing > 0 ? this.body.center.x + hb.x : this.body.center.x - hb.x - hb.w;
     return {
-      rect: new Phaser.Geom.Rectangle(x, this.body.bottom + hb.y, hb.w, hb.h),
+      rect: this.strikeRect(atk.hitbox),
       swingId: this.swingId,
       direction: this.facing,
       damage: atk.damage,
@@ -373,7 +344,7 @@ export class Player {
       this.internalDamage = Math.min(this.hp, this.internalDamage + hit.damage);
       this.internalHealTimer = INTERNAL_HEAL_DELAY;
       this.body.setVelocityX(hit.direction * BLOCK_PUSHBACK);
-      this.flash();
+      this.look.flash(FLASH_TIME);
       return 'block';
     }
 
@@ -405,7 +376,7 @@ export class Player {
     }
     this.body.reset(safe.x, safe.y - HITBOX_H / 2); // đặt lại vị trí, xoá vận tốc
     this.invulnTimer = INVULN_TIME;
-    this.flash();
+    this.look.flash(FLASH_TIME);
     this.fsm.transition('idle', true);
   }
 
@@ -440,10 +411,6 @@ export class Player {
     this.dashCooldown -= delta;
     this.dropThroughTimer -= delta;
     this.invulnTimer -= delta;
-    if (this.flashTimer > 0) {
-      this.flashTimer -= delta;
-      if (this.flashTimer <= 0) this.torso.clearTint();
-    }
     if (onGround) this.airDashAvailable = true;
 
     this.fsm.update(delta);
@@ -461,7 +428,7 @@ export class Player {
     const body = this.body;
     const input = this.input;
 
-    if (this.tryParry() || this.tryCounter() || this.tryDash() || this.tryTalisman() || this.tryAttack()) return;
+    if (this.tryParry() || this.tryCounter() || this.tryDash() || this.trySpecial() || this.tryAttack()) return;
     if (!body.blocked.down) {
       this.fsm.transition('fall'); // bước hụt khỏi mép (coyote time vẫn cho nhảy thêm một chút)
       return;
@@ -487,7 +454,7 @@ export class Player {
     this.body.setGravityY(0); // lúc bay lên chỉ chịu trọng lực thường
     this.jumpBufferTimer = 0;
     this.coyoteTimer = 0; // dùng hết "quyền nhảy", không nhảy được lần hai giữa không trung
-    this.squash(0.8, 1.2); // vươn dài người lúc bật lên
+    this.look.squash(0.8, 1.2, 160); // vươn dài người lúc bật lên
   }
 
   /** jump + fall: đang ở trên không. */
@@ -495,7 +462,7 @@ export class Player {
     const body = this.body;
     const input = this.input;
 
-    if (this.tryParry() || this.tryCounter() || this.tryDash() || this.tryTalisman() || this.tryAttack()) return;
+    if (this.tryParry() || this.tryCounter() || this.tryDash() || this.trySpecial() || this.tryAttack()) return;
     // Coyote jump: vừa rơi khỏi mép (hoặc bấm nhảy ngay trước khi chạm đất) vẫn nhảy được
     if (this.fsm.current === 'fall' && this.jumpBufferTimer > 0 && this.coyoteTimer > 0) {
       this.fsm.transition('jump');
@@ -536,7 +503,7 @@ export class Player {
     body.setVelocity(this.dashDir * DASH_SPEED, 0);
 
     // Juice: kéo dài người theo hướng lướt, vệt tốc độ, bụi dưới chân, tiếng "vút"
-    this.squash(1.35, 0.8, DASH_TIME);
+    this.look.squash(1.35, 0.8, DASH_TIME);
     this.spawnSpeedLines();
     if (onGround) this.spawnDust(this.body.center.x - this.dashDir * 30, this.body.bottom, 0.45);
     this.sfx.dash();
@@ -548,7 +515,7 @@ export class Player {
 
     this.afterimageTimer -= delta;
     if (this.afterimageTimer <= 0) {
-      this.spawnAfterimage();
+      this.look.afterimage();
       this.afterimageTimer += AFTERIMAGE_INTERVAL;
     }
 
@@ -571,7 +538,6 @@ export class Player {
     this.swingStarted = false;
     this.lungeStopped = false;
     this.swingId++;
-    this.swingStartAngle = this.swordAngle;
     // Giữa hai nhát được phép quay người: bấm hướng nào thì nhát mới chém về hướng đó
     if (this.input.moveX !== 0) this.facing = this.input.moveX > 0 ? 1 : -1;
 
@@ -596,7 +562,7 @@ export class Player {
     if (!this.swingStarted && t >= atk.startup) {
       this.swingStarted = true;
       this.sfx.swing(atk.power);
-      this.spawnSlashTrail();
+      this.look.swing(this.view());
     }
 
     // Bấm chém trong lúc đang chém => xếp hàng nhát tiếp theo (nhát cuối thì thôi)
@@ -640,8 +606,8 @@ export class Player {
     if (body.blocked.down) body.setVelocityX(moveTowards(body.velocity.x, 0, GROUND_DECEL * (delta / 1000)));
     else this.airVelocityY = body.velocity.y;
 
-    // Đã chặn được đòn thì được huỷ thế đỡ ngay: phản công, dán bùa, hoặc lướt đi
-    if (this.parryContact && (this.tryAttack() || this.tryTalisman() || this.tryDash())) return;
+    // Đã chặn được đòn thì được huỷ thế đỡ ngay: phản công, ra chiêu đặc biệt, hoặc lướt đi
+    if (this.parryContact && (this.tryAttack() || this.trySpecial() || this.tryDash())) return;
 
     if (this.fsm.timeInState >= PARRY_TIME) this.fsm.transition(body.blocked.down ? 'idle' : 'fall');
   }
@@ -651,8 +617,8 @@ export class Player {
     if (!this.parryContact) this.parryCooldown = PARRY_WHIFF_COOLDOWN;
   }
 
-  private enterTalisman() {
-    this.qi--; // tốn Qi ngay khi ra đòn, kể cả trượt: dùng bùa là một quyết định có rủi ro
+  private enterSpecial() {
+    this.qi--; // tốn Qi ngay khi ra chiêu, kể cả trượt: dùng chiêu là một quyết định có rủi ro
     this.swingId++;
     this.swingStarted = false;
     const body = this.body;
@@ -660,19 +626,20 @@ export class Player {
     if (!body.blocked.down && body.velocity.y > 0) body.setVelocityY(body.velocity.y * AIR_ATTACK_HANG);
   }
 
-  private updateTalisman(delta: number) {
+  private updateSpecial(delta: number) {
+    const sp = this.special;
     const body = this.body;
     const t = this.fsm.timeInState;
-    const activeEnd = TALISMAN_MOVE.startup + TALISMAN_MOVE.active;
+    const activeEnd = sp.startup + sp.active;
     body.setVelocityX(moveTowards(body.velocity.x, 0, GROUND_DECEL * (delta / 1000)));
     if (!body.blocked.down) this.airVelocityY = body.velocity.y;
 
-    if (!this.swingStarted && t >= TALISMAN_MOVE.startup) {
+    if (!this.swingStarted && t >= sp.startup) {
       this.swingStarted = true;
-      this.sfx.swing(0.2);
+      if (sp.swingSound !== undefined) this.sfx.swing(sp.swingSound);
     }
     if (t >= activeEnd && (this.tryParry() || this.tryDash())) return;
-    if (t >= activeEnd + TALISMAN_MOVE.recovery) this.fsm.transition(body.blocked.down ? 'idle' : 'fall');
+    if (t >= activeEnd + sp.recovery) this.fsm.transition(body.blocked.down ? 'idle' : 'fall');
   }
 
   private enterCounter() {
@@ -706,7 +673,7 @@ export class Player {
     }
 
     // Phản đòn trúng: được huỷ ngay phần còn lại để nối đòn, đúng như đỡ hoàn hảo
-    if (this.counterLanded && (this.tryAttack() || this.tryTalisman() || this.tryDash())) return;
+    if (this.counterLanded && (this.tryAttack() || this.trySpecial() || this.tryDash())) return;
     if (t >= activeEnd + COUNTER_MOVE.recovery) this.fsm.transition(body.blocked.down ? 'idle' : 'fall');
   }
 
@@ -721,8 +688,8 @@ export class Player {
     this.body.setGravityY(0);
     this.body.setVelocity(this.hitDirection * HURT_KNOCKBACK_X, -HURT_KNOCKBACK_Y);
     this.invulnTimer = INVULN_TIME;
-    this.flash();
-    this.squash(1.25, 0.8);
+    this.look.flash(FLASH_TIME);
+    this.look.squash(1.25, 0.8, 160);
   }
 
   /** Mất kiểm soát một lúc: không đọc input, chỉ bay theo cú hất rồi phanh lại. */
@@ -736,10 +703,13 @@ export class Player {
   private enterDead() {
     this.body.setAllowGravity(true);
     this.body.setVelocity(this.hitDirection * HURT_KNOCKBACK_X * 0.6, -HURT_KNOCKBACK_Y * 0.6);
-    this.flash();
-    // Ngã ngửa về phía bị đánh (container gốc ở chân nên xoay quanh bàn chân)
-    this.scene.tweens.killTweensOf(this.visual);
-    this.scene.tweens.add({ targets: this.visual, angle: this.hitDirection * 90, scaleX: 1, scaleY: 1, alpha: 0.6, duration: 500, ease: 'Bounce.Out' });
+    this.look.flash(FLASH_TIME);
+    this.look.die(this.hitDirection);
+  }
+
+  /** Ngã xuống rồi thì trượt chậm lại và nằm yên (không có dòng này xác sẽ trượt mãi vì Arcade không có ma sát). */
+  private updateDead(delta: number) {
+    if (this.body.blocked.down) this.body.setVelocityX(moveTowards(this.body.velocity.x, 0, GROUND_DECEL * 0.25 * (delta / 1000)));
   }
 
   // ===========================================================================
@@ -757,9 +727,15 @@ export class Player {
       dashPressed: this.anyJustDown(this.dashKeys),
       attackPressed: this.anyJustDown(this.attackKeys),
       parryPressed: this.anyJustDown(this.parryKeys),
-      talismanPressed: this.anyJustDown(this.talismanKeys),
+      specialPressed: this.anyJustDown(this.specialKeys),
       counterPressed: this.anyJustDown(this.counterKeys),
     };
+  }
+
+  /** Vùng tác động của một đòn (khai báo khi quay mặt sang PHẢI, tính từ chân) => toạ độ thế giới, có tính hướng nhìn. */
+  private strikeRect(hb: { x: number; y: number; w: number; h: number }) {
+    const x = this.facing > 0 ? this.body.center.x + hb.x : this.body.center.x - hb.x - hb.w;
+    return new Phaser.Geom.Rectangle(x, this.body.bottom + hb.y, hb.w, hb.h);
   }
 
   /** Chạy ngang: tăng/giảm tốc dần tới vận tốc mong muốn, không nhảy cóc. */
@@ -790,15 +766,15 @@ export class Player {
     return true;
   }
 
-  /** Dán bùa: cần ít nhất 1 Qi. Thiếu Qi thì kêu "xì" và báo HUD rung ô Qi. */
-  private tryTalisman() {
-    if (!this.input.talismanPressed) return false;
+  /** Chiêu đặc biệt: cần ít nhất 1 Qi. Thiếu Qi thì kêu "xì" và báo HUD rung ô Qi. */
+  private trySpecial() {
+    if (!this.input.specialPressed) return false;
     if (this.qi < 1) {
       this.qiDeniedCount++;
       this.sfx.fizzle();
       return false;
     }
-    this.fsm.transition('talisman');
+    this.fsm.transition('special');
     return true;
   }
 
@@ -814,7 +790,7 @@ export class Player {
   private land() {
     const impact = Phaser.Math.Clamp(this.airVelocityY / MAX_FALL_SPEED, 0, 1);
     if (impact < 0.25) return;
-    this.squash(Phaser.Math.Linear(1.05, 1.3, impact), Phaser.Math.Linear(0.95, 0.7, impact));
+    this.look.squash(Phaser.Math.Linear(1.05, 1.3, impact), Phaser.Math.Linear(0.95, 0.7, impact), 160);
     this.sfx.land(impact);
     if (impact > 0.45) {
       const scale = Phaser.Math.Linear(0.3, 0.55, impact);
@@ -824,185 +800,75 @@ export class Player {
   }
 
   // ===========================================================================
-  // Hiệu ứng (juice)
+  // Hiệu ứng (juice) dùng chung mọi bộ da: ảnh lấy từ phong cách hiệu ứng của chế độ đang chơi
   // ===========================================================================
-
-  /** Vệt chém vẽ bên trong container nhân vật (ngay sau thân, trước kiếm) nên đi theo người khi lao tới. */
-  private spawnSlashTrail() {
-    const from = this.toLocalRad(this.attack.swingFrom);
-    const to = this.toLocalRad(this.attack.swingTo);
-    const slash = drawSlash(this.scene, from, to, SLASH_RADIUS, this.attack.power);
-    slash.setPosition(SHOULDER.x * this.facing, SHOULDER.y);
-    this.visual.addAt(slash, this.visual.getIndex(this.sword));
-  }
-
-  /** Bóng mờ: bản sao thân nhân vật tô một màu, đứng yên tại chỗ rồi mờ dần. */
-  private spawnAfterimage() {
-    const ghost = this.scene.add
-      .image(this.body.center.x, this.body.bottom, ATLAS, 'character_roundGreen')
-      .setOrigin(0.5, BODY_FEET_ORIGIN_Y)
-      .setScale(this.visual.scaleX, this.visual.scaleY)
-      .setAngle(this.visual.angle)
-      .setTintFill(PLAYER_GREEN)
-      .setAlpha(0.45)
-      .setDepth(DEPTH_PLAYER - 1);
-    this.scene.tweens.add({ targets: ghost, alpha: 0, duration: 220, onComplete: () => ghost.destroy() });
-  }
 
   /** Vệt tốc độ: vài vạch ngang ở lại phía sau, co ngắn rồi biến mất. */
   private spawnSpeedLines() {
+    const texture = fxStyle(this.scene).texture;
     for (const offsetY of [-90, -55, -25]) {
       const line = this.scene.add
-        .image(this.body.center.x - this.dashDir * 40, this.body.bottom + offsetY + Phaser.Math.Between(-6, 6), ATLAS, 'effect_shotLarge')
+        .image(this.body.center.x - this.dashDir * 40, this.body.bottom + offsetY + Phaser.Math.Between(-6, 6), texture, 'effect_shotLarge')
         .setScale(Phaser.Math.FloatBetween(0.7, 1.1), 1)
-        .setDepth(DEPTH_PLAYER - 2);
+        .setDepth(PLAYER_DEPTH - 2);
       this.scene.tweens.add({ targets: line, scaleX: 0, alpha: 0, duration: Phaser.Math.Between(180, 260), ease: 'Quad.Out', onComplete: () => line.destroy() });
     }
   }
 
   /** Vạch tốc độ phía SAU cú đâm phản đòn (ngược với lướt: vạch nằm sau lưng theo hướng nhìn). */
   private spawnSpeedLinesForward() {
+    const texture = fxStyle(this.scene).texture;
     for (const offsetY of [-100, -72, -44]) {
       const line = this.scene.add
-        .image(this.body.center.x - this.facing * 30, this.body.bottom + offsetY, ATLAS, 'effect_shotLarge')
+        .image(this.body.center.x - this.facing * 30, this.body.bottom + offsetY, texture, 'effect_shotLarge')
         .setTint(COUNTER_RED)
-        .setDepth(DEPTH_PLAYER - 2);
+        .setDepth(PLAYER_DEPTH - 2);
       this.scene.tweens.add({ targets: line, scaleX: 0, alpha: 0, duration: 220, ease: 'Quad.Out', onComplete: () => line.destroy() });
     }
   }
 
   /** Bụi: một cụm tròn phình ra, bay lên chút rồi tan. */
   private spawnDust(x: number, y: number, scale: number) {
-    const dust = this.scene.add.image(x, y - 10, ATLAS, 'effect_blast').setScale(scale * 0.5).setDepth(DEPTH_PLAYER + 1);
+    const dust = this.scene.add.image(x, y - 10, fxStyle(this.scene).texture, 'effect_blast').setScale(scale * 0.5).setDepth(PLAYER_DEPTH + 1);
     this.scene.tweens.add({ targets: dust, scale, y: y - 30, alpha: 0, duration: 320, ease: 'Quad.Out', onComplete: () => dust.destroy() });
   }
 
-  /** Chớp trắng thân người; đếm bằng update nên đứng hình bao lâu thì trắng bấy lâu. */
-  private flash() {
-    this.flashTimer = 90;
-    this.torso.setTintFill(0xffffff);
-  }
-
-  /** Squash & stretch: méo hình ngay lập tức rồi đàn hồi về dáng cũ. */
-  private squash(scaleX: number, scaleY: number, duration = 160) {
-    this.scene.tweens.killTweensOf(this.visual);
-    this.visual.setScale(scaleX, scaleY);
-    this.scene.tweens.add({ targets: this.visual, scaleX: 1, scaleY: 1, duration, ease: 'Quad.Out' });
-  }
-
   // ===========================================================================
-  // Procedural animation: tính tư thế từ trạng thái + vận tốc, mỗi frame
+  // Gửi trạng thái cho bộ da
   // ===========================================================================
 
-  /** Góc kiếm (độ, hệ "quay mặt sang phải") => radian trong hệ của container, có tính hướng nhìn. */
-  private toLocalRad(deg: number) {
-    return Phaser.Math.DegToRad(this.facing > 0 ? deg : 180 - deg); // quay trái = soi gương
+  private syncLook() {
+    this.look.update(this.view(), this.hitStop.active);
   }
 
-  private animate() {
-    if (this.hitStop.active) return; // đứng hình: giữ nguyên tư thế
-
-    const dt = this.scene.game.loop.delta / 1000;
-    const t = this.scene.time.now / 1000;
-    const state = this.fsm.current;
-    const vx = this.body.velocity.x;
-    const speed01 = Math.min(1, Math.abs(vx) / RUN_SPEED);
-    // Làm mượt theo hàm mũ 1 - e^(-dt × tốc độ): kết quả như nhau dù máy chạy 30 hay 144 FPS
-    const k = 1 - Math.exp(-dt * 20);
-
-    this.visual.setPosition(this.hitbox.x, this.hitbox.y + HITBOX_H / 2);
-    if (state === 'dead') return; // đang diễn cảnh ngã (tween lo góc + độ mờ): chỉ bám theo thân
-
-    // Đổ người theo hướng chạy (khi lướt vận tốc rất lớn nên giới hạn góc); bị đánh thì bật ngửa ra sau
-    this.visual.angle = state === 'hurt' ? this.hitDirection * 14 : Phaser.Math.Clamp((vx / RUN_SPEED) * 6, -12, 12);
-    // Đang miễn nhiễm sau khi trúng đòn: nhấp nháy để người chơi biết mình "an toàn" bao lâu
-    const blinking = this.invulnTimer > 0 && state !== 'dash';
-    this.visual.setAlpha(blinking && Math.floor(this.scene.time.now / 70) % 2 === 0 ? 0.35 : 1);
-
-    // Chu kỳ bước chạy: chạy càng nhanh, chân "bước" càng dồn dập
-    if (state === 'run') this.runPhase += dt * 14 * speed01;
-    const step = Math.sin(this.runPhase);
-
-    // Thân: nhún lên mỗi bước khi chạy, phập phồng nhẹ khi đứng (thở)
-    const bob = state === 'run' ? -Math.abs(step) * 8 : 0;
-    const breathe = state === 'idle' ? Math.sin(t * 3) * 0.02 : 0;
-    this.torso.setY(bob).setScale(1, 1 + breathe);
-
-    const f = this.facing;
-    let front: Point;
-    let back: Point;
-    // Thủ thế và dán bùa là phản xạ: tư thế phải "bật" ngay, không trượt mềm từ từ như các tư thế khác
-    const kPose = state === 'parry' || state === 'talisman' || state === 'counter' ? 1 - Math.exp(-dt * 45) : k;
-    const counterThrusting = state === 'counter' && this.fsm.timeInState >= COUNTER_MOVE.startup;
-
-    if (state === 'attack') {
-      // Góc kiếm tính thẳng từ thời gian trong đòn (không làm mượt): vung phải đúng nhịp frame data
-      const atk = this.attack;
-      const tt = this.fsm.timeInState;
-      if (tt < atk.startup) this.swordAngle = Phaser.Math.Linear(this.swingStartAngle, atk.swingFrom, easeOutCubic(tt / atk.startup));
-      else if (tt < atk.startup + atk.active) this.swordAngle = Phaser.Math.Linear(atk.swingFrom, atk.swingTo, easeOutCubic((tt - atk.startup) / atk.active));
-      else this.swordAngle = atk.swingTo;
-      // Tay cầm kiếm chạy trên một cung tròn quanh vai, theo đúng góc kiếm
-      const a = this.toLocalRad(this.swordAngle);
-      front = { x: SHOULDER.x * f + Math.cos(a) * HAND_RADIUS, y: SHOULDER.y + Math.sin(a) * HAND_RADIUS };
-      back = { x: -f * 30, y: -62 };
-      this.frontHand.setPosition(front.x, front.y);
-    } else {
-      // Ngoài lúc chém: kiếm và tay trượt về tư thế nghỉ của từng trạng thái
-      let swordTarget = SWORD_REST[state];
-      if (state === 'parry' && this.deflected) swordTarget = -35; // đỡ được: hất kiếm tới trước
-      if (state === 'counter') swordTarget = counterThrusting ? 0 : 170; // rút kiếm ra sau lưng, rồi đâm thẳng tới
-      this.swordAngle += (swordTarget - this.swordAngle) * kPose;
-      switch (state) {
-        case 'parry': // dựng kiếm chắn trước mặt, tay sau đỡ sống kiếm; đỡ được thì đẩy kiếm tới
-          front = this.deflected ? { x: f * 56, y: -86 } : { x: f * 36, y: -78 };
-          back = { x: f * 12, y: -64 };
-          break;
-        case 'counter': // lấy đà: tay kiếm kéo về sau hông; đâm: duỗi thẳng tay ra trước
-          front = counterThrusting ? { x: f * 76, y: -74 } : { x: -f * 8, y: -70 };
-          back = { x: -f * 36, y: -64 };
-          break;
-        case 'talisman': { // kiếm thu về, tay trái rút ra sau rồi vươn thẳng tới dán bùa
-          const reached = this.fsm.timeInState >= TALISMAN_MOVE.startup;
-          front = { x: -f * 10, y: -56 };
-          back = reached ? { x: f * 80, y: -76 } : { x: -f * 40, y: -70 };
-          break;
-        }
-        case 'run': // hai tay vung ngược chiều nhau theo bước chạy
-          front = { x: f * (44 + step * 16), y: -52 - Math.abs(step) * 6 };
-          back = { x: -f * (40 + step * 16), y: -50 };
-          break;
-        case 'jump': // giơ tay lên khi bật nhảy
-          front = { x: f * 50, y: -96 };
-          back = { x: -f * 46, y: -88 };
-          break;
-        case 'fall': // dang tay giữ thăng bằng khi rơi
-          front = { x: f * 60, y: -104 };
-          back = { x: -f * 56, y: -98 };
-          break;
-        case 'dash': // cả hai tay bị gió hất ra sau
-          front = { x: -f * 24, y: -74 };
-          back = { x: -f * 60, y: -64 };
-          break;
-        case 'hurt': // tay vung loạn xạ khi bị hất văng
-          front = { x: this.hitDirection * 40, y: -110 };
-          back = { x: this.hitDirection * 70, y: -96 };
-          break;
-        default: // đứng: tay lắc lư nhẹ
-          front = { x: f * 46, y: -54 + Math.sin(t * 3) * 3 };
-          back = { x: -f * 42, y: -52 + Math.sin(t * 3 + 1) * 3 };
-      }
-      this.frontHand.setPosition(this.frontHand.x + (front.x - this.frontHand.x) * kPose, this.frontHand.y + (front.y - this.frontHand.y) * kPose);
+  /** Frame data của động tác đang ra, để bộ da biết lúc nào là lấy đà, lúc nào là chém trúng. */
+  private currentMove(): MoveTiming | null {
+    switch (this.fsm.current) {
+      case 'attack': return this.attack;
+      case 'special': return this.special;
+      case 'counter': return COUNTER_MOVE;
+      default: return null;
     }
-    this.backHand.setPosition(this.backHand.x + (back.x - this.backHand.x) * kPose, this.backHand.y + (back.y - this.backHand.y) * kPose);
+  }
 
-    // Kiếm luôn nằm trong tay trước; sprite kiếm vẽ mũi hướng lên nên xoay thêm 90°
-    this.sword.setPosition(this.frontHand.x, this.frontHand.y).setRotation(this.toLocalRad(this.swordAngle) + Math.PI / 2).setFlipX(f < 0);
-    // Kiếm loé vàng đúng trong cửa sổ đỡ hoàn hảo: người chơi NHÌN THẤY cửa sổ dài bao nhiêu
-    // Kiếm loé đỏ trong khung phản đòn: hai cửa sổ thời gian, hai màu, không lẫn được
-    if (this.inPerfectWindow) this.sword.setTintFill(QI_GOLD);
-    else if (this.inCounterWindow) this.sword.setTintFill(COUNTER_RED);
-    else this.sword.clearTint();
+  private view(): PlayerView {
+    return {
+      x: this.hitbox.x,
+      feetY: this.hitbox.y + HITBOX_H / 2,
+      state: this.fsm.current,
+      timeInState: this.fsm.timeInState,
+      facing: this.facing,
+      runRatio: this.body.velocity.x / RUN_SPEED,
+      hitDirection: this.hitDirection,
+      blinking: this.invulnTimer > 0 && this.fsm.current !== 'dash',
+      deflected: this.deflected,
+      perfectWindow: this.inPerfectWindow,
+      counterWindow: this.inCounterWindow,
+      swingId: this.swingId,
+      comboIndex: this.comboIndex,
+      attack: this.attack,
+      move: this.currentMove(),
+    };
   }
 
   // ===========================================================================

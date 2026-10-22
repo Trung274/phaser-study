@@ -102,7 +102,7 @@ export class Sfx {
     this.noise(0.08, 0.25, 'lowpass', 1800, 400, 0.8);
   }
 
-  /** Hết Qi mà vẫn bấm dùng bùa: tiếng "xì" nhỏ. */
+  /** Hết Qi mà vẫn bấm chiêu đặc biệt: tiếng "xì" nhỏ. */
   fizzle() {
     this.noise(0.12, 0.12, 'bandpass', 900, 300, 2);
   }
@@ -118,6 +118,20 @@ export class Sfx {
     this.tone(95, 'sine', 0.6, 0.7, 30);
     this.noise(0.5, 0.5, 'lowpass', 4500, 90, 0.8);
     this.tone(320, 'sawtooth', 0.3, 0.12, 60);
+  }
+
+  /** Bắn cung: dây cung bật "tưng" (trầm, tụt nhanh) + tiếng mũi tên xé gió (nhiễu cao, ngắn). */
+  bowShot() {
+    const p = this.randomPitch();
+    this.tone(190 * p, 'triangle', 0.14, 0.28, 95 * p);
+    this.noise(0.16, 0.22, 'bandpass', 5200 * p, 1600 * p, 2.2);
+  }
+
+  /** Mũi tên cắm vào tường: tiếng "cộp" khô, ngắn. */
+  arrowThunk() {
+    const p = this.randomPitch();
+    this.tone(440 * p, 'square', 0.05, 0.1, 210 * p);
+    this.noise(0.05, 0.2, 'bandpass', 2400 * p, 900, 1.5);
   }
 
   /** Boss gầm: tiếng trầm rè kéo dài, quét xuống rồi lên. */

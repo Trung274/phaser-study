@@ -42,8 +42,11 @@ export interface Strike extends HitInfo {
   swingId: number;
   /** ms đứng hình khi trúng. */
   hitStop: number;
-  /** Đòn đặc biệt: 'talisman' = không gây sát thương ngay mà dán bùa lên mục tiêu. */
-  effect?: 'talisman';
+  /**
+   * Chiêu đặc biệt, không gây sát thương tại chỗ:
+   * 'talisman' = dán bùa lên mục tiêu (nổ sau một nhịp), 'arrow' = bắn một mũi tên từ tâm vùng `rect`.
+   */
+  effect?: 'talisman' | 'arrow';
   /** Đòn đỏ: không đỡ được (đỡ = vỡ thế). Chỉ né, hoặc phản đòn đúng lúc. */
   unblockable?: boolean;
 }

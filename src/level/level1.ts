@@ -1,5 +1,6 @@
 // Màn chơi vẽ bằng lưới ký tự: mỗi ký tự là một ô 128×128.
-// Sửa địa hình = sửa chữ ở đây. Bảng ký hiệu nằm trong buildLevel.ts:
+// Sửa địa hình = sửa chữ ở đây. Ký tự nào vẽ bằng hình nào là do bộ gạch của từng chế độ
+// (themes/scribble.ts, themes/pixel/index.ts); ý nghĩa các ký tự giống nhau ở mọi chế độ:
 //
 //   .  trống          #  đất (mặt trên tự đổi hình)    B  gạch     C  thùng gỗ
 //   =  cầu một chiều (nhảy xuyên từ dưới lên, ↓ + nhảy để rơi xuống)

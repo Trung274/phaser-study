@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
-import { ATLAS } from '../config';
-import { HEAVY_FONT, VI_TEXT } from '../ui/textStyle';
+import { VI_TEXT } from '../ui/textStyle';
+import { fxStyle } from './fxStyle';
 
 const lerp = Phaser.Math.Linear;
 const DEPTH_EFFECTS = 50;
@@ -41,8 +41,9 @@ export function drawSlash(scene: Phaser.Scene, fromRad: number, toRad: number, r
  * khung hình đứng yên phải là khung "đã" nhất.
  */
 export function spawnHitSpark(scene: Phaser.Scene, x: number, y: number, power: number, direction: 1 | -1) {
+  const { texture } = fxStyle(scene);
   const flashScale = lerp(0.6, 1.05, power);
-  const flash = scene.add.image(x, y, ATLAS, 'effect_blast').setScale(flashScale).setDepth(DEPTH_EFFECTS);
+  const flash = scene.add.image(x, y, texture, 'effect_blast').setScale(flashScale).setDepth(DEPTH_EFFECTS);
   scene.tweens.add({ targets: flash, scale: flashScale * 1.35, alpha: 0, duration: 150, ease: 'Quad.Out', onComplete: () => flash.destroy() });
 
   const rays = Math.round(lerp(5, 9, power));
@@ -53,7 +54,7 @@ export function spawnHitSpark(scene: Phaser.Scene, x: number, y: number, power: 
     const rad = Phaser.Math.DegToRad(angleDeg);
     const distance = lerp(70, 140, power) * Phaser.Math.FloatBetween(0.7, 1.1);
     const ray = scene.add
-      .image(x + Math.cos(rad) * 24, y + Math.sin(rad) * 24, ATLAS, 'effect_shot')
+      .image(x + Math.cos(rad) * 24, y + Math.sin(rad) * 24, texture, 'effect_shot')
       .setRotation(rad)
       .setScale(lerp(0.8, 1.3, power), 1)
       .setDepth(DEPTH_EFFECTS);
@@ -75,12 +76,13 @@ export function spawnHitSpark(scene: Phaser.Scene, x: number, y: number, power: 
  * Hình dạng khác hẳn tia chém trúng để mắt phân biệt được ngay "mình đỡ được" hay "mình chém trúng".
  */
 export function spawnParrySpark(scene: Phaser.Scene, x: number, y: number) {
-  const flash = scene.add.image(x, y, ATLAS, 'effect_blastLarge').setScale(0.55).setDepth(DEPTH_EFFECTS);
+  const { texture, ink } = fxStyle(scene);
+  const flash = scene.add.image(x, y, texture, 'effect_blastLarge').setScale(0.55).setDepth(DEPTH_EFFECTS);
   scene.tweens.add({ targets: flash, scale: 0.95, alpha: 0, duration: 200, ease: 'Quad.Out', onComplete: () => flash.destroy() });
 
   // Vòng xung kích: hiện sẵn ở cỡ vừa để khung hình đứng yên (hit-stop) vẫn thấy rõ
   const ring = scene.add.graphics().setPosition(x, y).setDepth(DEPTH_EFFECTS).setScale(1.5);
-  ring.lineStyle(6, 0x2b2b2b, 1);
+  ring.lineStyle(6, ink, 1);
   ring.strokeCircle(0, 0, 30);
   scene.tweens.add({ targets: ring, scale: 4.5, alpha: 0, duration: 280, ease: 'Cubic.Out', onComplete: () => ring.destroy() });
 
@@ -88,7 +90,7 @@ export function spawnParrySpark(scene: Phaser.Scene, x: number, y: number) {
     const rad = (i / 12) * Math.PI * 2 + Phaser.Math.FloatBetween(-0.15, 0.15);
     const distance = Phaser.Math.Between(110, 170);
     const ray = scene.add
-      .image(x + Math.cos(rad) * 30, y + Math.sin(rad) * 30, ATLAS, 'effect_shotLarge')
+      .image(x + Math.cos(rad) * 30, y + Math.sin(rad) * 30, texture, 'effect_shotLarge')
       .setRotation(rad)
       .setScale(0.7, 1)
       .setDepth(DEPTH_EFFECTS);
@@ -106,11 +108,12 @@ export function spawnParrySpark(scene: Phaser.Scene, x: number, y: number) {
 }
 
 /**
- * Phản đòn: hai vệt chém chéo hình chữ X (mực đen viền, lõi đỏ) + chớp lớn + tia toé mọi hướng.
+ * Phản đòn: hai vệt chém chéo hình chữ X (viền màu nét của chế độ chơi, lõi đỏ) + chớp lớn + tia toé mọi hướng.
  * To và "nặng" nhất trong mọi hiệu ứng va chạm: đây là phần thưởng lớn nhất của hệ thống chiến đấu.
  */
 export function spawnCounterBurst(scene: Phaser.Scene, x: number, y: number) {
-  const flash = scene.add.image(x, y, ATLAS, 'effect_blastLarge').setTint(0xffb0b0).setScale(0.9).setDepth(DEPTH_EFFECTS);
+  const { texture, ink } = fxStyle(scene);
+  const flash = scene.add.image(x, y, texture, 'effect_blastLarge').setTint(0xffb0b0).setScale(0.9).setDepth(DEPTH_EFFECTS);
   scene.tweens.add({ targets: flash, scale: 1.6, alpha: 0, duration: 280, ease: 'Quad.Out', onComplete: () => flash.destroy() });
 
   const cross = scene.add.graphics().setPosition(x, y).setDepth(DEPTH_EFFECTS + 1).setScale(1.2);
@@ -118,7 +121,7 @@ export function spawnCounterBurst(scene: Phaser.Scene, x: number, y: number) {
     const rad = Phaser.Math.DegToRad(angle);
     const dx = Math.cos(rad) * 110;
     const dy = Math.sin(rad) * 110;
-    cross.lineStyle(22, 0x2b2b2b, 1).lineBetween(-dx, -dy, dx, dy); // viền mực
+    cross.lineStyle(22, ink, 1).lineBetween(-dx, -dy, dx, dy); // viền
     cross.lineStyle(12, 0xff3b3b, 1).lineBetween(-dx, -dy, dx, dy); // lõi đỏ
   }
   scene.tweens.add({ targets: cross, scale: 1.5, alpha: 0, duration: 380, ease: 'Cubic.Out', onComplete: () => cross.destroy() });
@@ -126,7 +129,7 @@ export function spawnCounterBurst(scene: Phaser.Scene, x: number, y: number) {
   for (let i = 0; i < 14; i++) {
     const rad = (i / 14) * Math.PI * 2;
     const distance = Phaser.Math.Between(140, 220);
-    const ray = scene.add.image(x, y, ATLAS, 'effect_shotLarge').setRotation(rad).setDepth(DEPTH_EFFECTS);
+    const ray = scene.add.image(x, y, texture, 'effect_shotLarge').setRotation(rad).setDepth(DEPTH_EFFECTS);
     scene.tweens.add({
       targets: ray,
       x: x + Math.cos(rad) * distance,
@@ -140,15 +143,19 @@ export function spawnCounterBurst(scene: Phaser.Scene, x: number, y: number) {
   }
 }
 
-/** Dòng chữ gọi tên tình huống ("PHẢN ĐÒN!", "PHÁ THẾ!"): giúp người mới học luật bằng mắt. */
-export function spawnCallout(scene: Phaser.Scene, x: number, y: number, message: string, color: string) {
+/**
+ * Dòng chữ gọi tên tình huống ("PHẢN ĐÒN!", "PHÁ THẾ!"): giúp người mới học luật bằng mắt.
+ * Không truyền màu thì dùng màu chữ trung tính của chế độ chơi đang chạy.
+ */
+export function spawnCallout(scene: Phaser.Scene, x: number, y: number, message: string, color?: string) {
+  const fx = fxStyle(scene);
   const text = scene.add
     .text(x, y, message, {
       ...VI_TEXT,
-      fontFamily: HEAVY_FONT,
+      fontFamily: fx.font,
       fontSize: '44px',
-      color,
-      stroke: '#ffffff',
+      color: color ?? fx.calloutInk,
+      stroke: fx.calloutStroke,
       strokeThickness: 10,
     })
     .setOrigin(0.5)
@@ -160,13 +167,14 @@ export function spawnCallout(scene: Phaser.Scene, x: number, y: number, message:
 
 /** Kẻ địch tan biến: chớp lớn + các cụm khói văng ra mọi hướng. */
 export function spawnDeathBurst(scene: Phaser.Scene, x: number, y: number) {
-  const flash = scene.add.image(x, y, ATLAS, 'effect_blastLarge').setScale(0.9).setDepth(DEPTH_EFFECTS);
+  const { texture } = fxStyle(scene);
+  const flash = scene.add.image(x, y, texture, 'effect_blastLarge').setScale(0.9).setDepth(DEPTH_EFFECTS);
   scene.tweens.add({ targets: flash, scale: 1.4, alpha: 0, duration: 260, ease: 'Quad.Out', onComplete: () => flash.destroy() });
 
   for (let i = 0; i < 7; i++) {
     const rad = (i / 7) * Math.PI * 2 + Phaser.Math.FloatBetween(-0.3, 0.3);
     const distance = Phaser.Math.Between(70, 130);
-    const puff = scene.add.image(x, y, ATLAS, 'effect_blast').setScale(Phaser.Math.FloatBetween(0.35, 0.55)).setDepth(DEPTH_EFFECTS);
+    const puff = scene.add.image(x, y, texture, 'effect_blast').setScale(Phaser.Math.FloatBetween(0.35, 0.55)).setDepth(DEPTH_EFFECTS);
     scene.tweens.add({
       targets: puff,
       x: x + Math.cos(rad) * distance,
@@ -185,7 +193,7 @@ export function spawnDamageNumber(scene: Phaser.Scene, x: number, y: number, dam
   const isHeavy = power >= 1;
   const text = scene.add
     .text(x, y - 30, isHeavy ? `${damage}!` : `${damage}`, {
-      fontFamily: HEAVY_FONT,
+      fontFamily: fxStyle(scene).font,
       fontSize: `${Math.round(lerp(38, 64, power))}px`,
       color: '#ffffff',
       stroke: '#2b2b2b',
