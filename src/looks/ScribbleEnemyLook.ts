@@ -13,7 +13,6 @@ type Point = { x: number; y: number };
 
 /** Bộ da Scribble của lính giáo: thân tím + hai tay + cây giáo, tư thế tính bằng code như ScribblePlayerLook. */
 export class ScribbleEnemyLook implements EnemyLook {
-  readonly weaponTip = { x: 8 + SPEAR_REACH, y: -66 };
 
   private readonly scene: Phaser.Scene;
   private readonly visual: Phaser.GameObjects.Container;
@@ -37,6 +36,11 @@ export class ScribbleEnemyLook implements EnemyLook {
     this.frontHand = scene.add.image(30, -58, ATLAS, 'character_handPurple');
     this.redAura = scene.add.image(0, -62, ATLAS, 'effect_blastLarge').setTint(DANGER_RED).setAlpha(0);
     this.visual = scene.add.container(x, feetY, [this.redAura, this.backHand, this.torso, this.spear, this.frontHand]).setDepth(ENEMY_DEPTH);
+  }
+
+  /** Mũi giáo: hai đòn cùng một tư thế đâm. */
+  weaponTip() {
+    return { x: 8 + SPEAR_REACH, y: -66 };
   }
 
   flash(color: number, ms: number) {

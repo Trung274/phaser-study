@@ -24,8 +24,8 @@ export interface EnemyView {
 
 /** "Bộ da" của kẻ địch: như PlayerLook, chỉ lo phần nhìn thấy. */
 export interface EnemyLook {
-  /** Mũi vũ khí lúc sắp đánh, tính từ chân khi quay mặt sang PHẢI: chỗ loé sáng báo trước. */
-  readonly weaponTip: { x: number; y: number };
+  /** Chỗ vũ khí lúc sắp đánh (đòn thường / đòn đỏ), tính từ chân khi quay mặt sang PHẢI: chỗ loé sáng báo trước. */
+  weaponTip(red: boolean): { x: number; y: number };
   /** Gọi mỗi frame SAU physics, kể cả lúc đang chết (để diễn cảnh chết). */
   update(view: EnemyView, frozen: boolean): void;
   /** Phủ kín một màu trong `ms` mili giây: trắng = trúng đòn / báo trước đòn thường, đỏ = báo trước đòn đỏ. */

@@ -98,7 +98,7 @@ export class GameScene extends Phaser.Scene {
     this.theme = theme;
     setFxStyle(this, theme.fx);
 
-    const level = buildLevel(this, theme.map, theme.tileset);
+    const level = buildLevel(this, theme.map, theme.tileset, Object.keys(theme.enemies));
     this.level = level;
 
     // Thế giới rộng hơn màn hình: physics và camera đều phải biết kích thước thật.
@@ -137,11 +137,14 @@ export class GameScene extends Phaser.Scene {
     }
 
     for (const spawn of level.enemySpawns) {
+      // Ký tự trên bản đồ quyết định loại kẻ địch: chỉ số (luật chơi) + bộ da (phần nhìn) đều lấy từ theme
+      const kind = theme.enemies[spawn.char];
       const enemy = new Enemy(this, spawn.x, spawn.y, {
         sfx: this.sfx,
         hitStop: this.hitStop,
         isGroundAt: level.isGroundAt,
-        look: theme.createEnemyLook(this, spawn.x, spawn.y),
+        stats: kind.stats,
+        look: kind.createLook(this, spawn.x, spawn.y),
       });
       // Kẻ địch đứng được trên đất và cầu; không va chạm với người chơi (đi xuyên qua nhau được).
       // Giữ lại collider để xoá cùng kẻ địch khi nó chết.

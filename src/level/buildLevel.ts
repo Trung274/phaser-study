@@ -29,8 +29,8 @@ export interface BuiltLevel {
   spawn: { x: number; y: number };
   /** Vị trí CHÂN các hình nộm luyện chém (ký tự 'D'). */
   dummySpawns: { x: number; y: number }[];
-  /** Vị trí CHÂN kẻ địch (ký tự 'E'). */
-  enemySpawns: { x: number; y: number }[];
+  /** Vị trí CHÂN kẻ địch + ký tự trên bản đồ (mỗi chế độ quy định ký tự nào là loại kẻ địch nào). */
+  enemySpawns: { x: number; y: number; char: string }[];
   /** Vị trí CHÂN boss (ký tự 'X'), không có thì null. */
   bossSpawn: { x: number; y: number } | null;
   /** Điểm (x, y) nằm trong ô đặc (đất, gạch, thùng)? */
@@ -47,7 +47,7 @@ export interface BuiltLevel {
  * 2. VA CHẠM: gộp các ô đặc liền nhau thành ít hình chữ nhật lớn (vô hình).
  *    Ít vật thể hơn => nhanh hơn, và nhân vật không bị "vấp" ở khe giữa hai ô cạnh nhau.
  */
-export function buildLevel(scene: Phaser.Scene, map: string[], tileset: Tileset): BuiltLevel {
+export function buildLevel(scene: Phaser.Scene, map: string[], tileset: Tileset, enemyChars: string[]): BuiltLevel {
   const rows = map.length;
   const cols = map[0].length;
   map.forEach((line, r) => {
@@ -59,7 +59,7 @@ export function buildLevel(scene: Phaser.Scene, map: string[], tileset: Tileset)
   const oneWayCells: boolean[][] = [];
   let spawn = { x: TILE, y: (rows - 1) * TILE };
   const dummySpawns: { x: number; y: number }[] = [];
-  const enemySpawns: { x: number; y: number }[] = [];
+  const enemySpawns: { x: number; y: number; char: string }[] = [];
   let bossSpawn: { x: number; y: number } | null = null;
 
   for (let r = 0; r < rows; r++) {
@@ -75,9 +75,10 @@ export function buildLevel(scene: Phaser.Scene, map: string[], tileset: Tileset)
       const feet = { x: c * TILE + TILE / 2, y: (r + 1) * TILE };
       if (ch === 'P') spawn = feet;
       if (ch === 'D') dummySpawns.push(feet);
-      if (ch === 'E') enemySpawns.push(feet);
+      const isEnemy = enemyChars.includes(ch);
+      if (isEnemy) enemySpawns.push({ ...feet, char: ch });
       if (ch === 'X') bossSpawn = feet;
-      if (ch === '.' || ch === 'P' || ch === 'D' || ch === 'E' || ch === 'X') continue;
+      if (ch === '.' || ch === 'P' || ch === 'D' || ch === 'X' || isEnemy) continue;
       if (!def) throw new Error(`Bản đồ: ký tự lạ '${ch}' ở hàng ${r}, cột ${c}`);
 
       if (def.kind === 'decor') {

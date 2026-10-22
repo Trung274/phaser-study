@@ -1,4 +1,4 @@
-// Màn chơi của chế độ Pixel: cùng bảng ký hiệu với level1.ts (xem đó), không có hình nộm và boss.
+// Màn chơi của chế độ Pixel: Lính & Orc. Cùng bảng ký hiệu với level1.ts (xem đó), không có hình nộm và boss.
 //
 //   P xuất phát · E orc · # đất · B gạch đá · C thùng gỗ · = cầu một chiều
 //   b bụi cây · f hàng rào · T cây thông · F cờ (trang trí)
@@ -6,7 +6,7 @@
 // Đường đi: orc đầu tiên trên đất bằng → hố 2 ô (có cầu bắc ngang phía trên) → pháo đài gạch có orc đứng trên nóc
 // (bậc 1 ô rồi bậc 2 ô: nhảy cao tối đa ~2.45 ô) → cầu treo tuỳ chọn → hai orc cuối màn. Hạ hết orc là thắng.
 
-export const PIXEL_LEVEL = [
+export const FOREST_LEVEL = [
   '............................................................',
   '............................................................',
   '............................................................',

@@ -8,9 +8,9 @@ import { HEAVY_FONT, VI_TEXT } from '../ui/textStyle';
 import { THEME_LIST, type Theme } from '../themes';
 import type { GameSceneData } from './GameScene';
 
-const CARD_W = 700;
+const CARD_W = 560;
 const CARD_H = 660;
-const CARD_GAP = 80;
+const CARD_GAP = 50;
 const CARD_Y = 575;           // tâm thẻ
 const FLOOR_OFFSET = 290;     // mặt sàn trong thẻ, tính từ mép trên thẻ
 const BODY_FONT = '"Segoe UI", Arial, sans-serif';
@@ -106,24 +106,27 @@ export class MenuScene extends Phaser.Scene {
     // Sàn: một hàng ô mặt đất lấy từ bộ gạch của chế độ đó
     const floorY = top + FLOOR_OFFSET;
     const ts = theme.tileset;
-    for (let i = 0; i < 5; i++) {
-      this.add.image(left + 30 + i * TILE + TILE / 2, floorY + TILE / 2, ts.texture, ts.groundTop).setScale(ts.scale).setDepth(1);
+    const tiles = Math.floor((CARD_W - 40) / TILE);
+    const floorLeft = x - (tiles * TILE) / 2;
+    for (let i = 0; i < tiles; i++) {
+      this.add.image(floorLeft + i * TILE + TILE / 2, floorY + TILE / 2, ts.texture, ts.groundTop).setScale(ts.scale).setDepth(1);
     }
 
     const textStyle = { ...VI_TEXT, color: hud.text };
-    this.add.text(left + 36, floorY + TILE + 18, theme.name, { ...textStyle, fontFamily: HEAVY_FONT, fontSize: '40px' }).setDepth(2);
+    this.add.text(left + 30, floorY + TILE + 18, theme.name, { ...textStyle, fontFamily: HEAVY_FONT, fontSize: '38px' }).setDepth(2);
     this.add
-      .text(left + 36, floorY + TILE + 80, theme.description, { ...textStyle, fontFamily: BODY_FONT, fontSize: '25px', lineSpacing: 4, wordWrap: { width: CARD_W - 72 } })
+      .text(left + 30, floorY + TILE + 78, theme.description, { ...textStyle, fontFamily: BODY_FONT, fontSize: '23px', lineSpacing: 3, wordWrap: { width: CARD_W - 60 } })
       .setDepth(2)
       .setAlpha(0.85);
 
-    // Nhân vật xem trước: chính bộ da trong game, người chơi bên trái, kẻ địch bên phải quay mặt lại
-    const px = x - 130;
-    const ex = x + 160;
+    // Nhân vật xem trước: chính bộ da trong game, người chơi bên trái, loại kẻ địch đầu tiên bên phải quay mặt lại
+    const px = x - 120;
+    const ex = x + 130;
+    const [firstEnemy] = Object.values(theme.enemies);
     const card: Card = {
       theme,
       player: theme.createPlayerLook(this, px, floorY),
-      enemy: theme.createEnemyLook(this, ex, floorY),
+      enemy: firstEnemy.createLook(this, ex, floorY),
       playerView: {
         x: px, feetY: floorY, state: 'idle', timeInState: 0, facing: 1, runRatio: 0, hitDirection: 1,
         blinking: false, deflected: false, perfectWindow: false, counterWindow: false,

@@ -1,11 +1,13 @@
 /**
- * Vẽ pixel art bằng code cho chế độ Pixel: gạch 16×16, nền nhiều lớp, hiệu ứng, trái tim, ô Qi.
+ * Vẽ pixel art bằng code cho các chế độ Pixel: gạch 16×16, nền nhiều lớp, hiệu ứng, trái tim, ô Qi.
  * Gói Tiny RPG chỉ có NHÂN VẬT, nên phần còn lại phải tự vẽ cho cùng phong cách.
  *
+ * Mọi hàm nhận một BẢNG MÀU (palettes.ts): cùng hình, đổi bảng màu là ra vùng đất khác (cỏ => tuyết...).
  * Toàn bộ file là HÀM THUẦN: chỉ tạo mảng pixel RGBA, không đụng tới trình duyệt hay Phaser.
  * => Xem trước được bằng Node (xuất PNG) trước khi đưa vào game; game chỉ việc chép mảng vào canvas.
  * Ngẫu nhiên nhưng có "hạt giống" (seed) cố định => lần nào chạy cũng ra đúng một hình.
  */
+import type { Palette } from './palettes';
 
 export interface PixelImage {
   w: number;
@@ -26,50 +28,6 @@ export interface PixelSheet {
   image: PixelImage;
   frames: Record<string, FrameRect>;
 }
-
-// ============================================================================
-// Bảng màu: hoàng hôn tím. Ít màu, có chủ đích => các phần tự vẽ hợp tông với nhau
-// ============================================================================
-export const PALETTE = {
-  night: 0x0f1029,
-  star: 0x9d93c4,
-  starBright: 0xfff4d6,
-  moon: 0xf3e3b8,
-  moonShade: 0xd9c08a,
-  mountain: 0x3d2f63,
-  mountainLight: 0x5a4a86,
-  forest: 0x1d1838,
-  forestLight: 0x2f2858,
-  grassLight: 0x8ccf52,
-  grass: 0x5aa83f,
-  grassDark: 0x2f6b34,
-  dirt: 0x7a4f2e,
-  dirtLight: 0x9a6a3c,
-  dirtDark: 0x5a3822,
-  dirtDeep: 0x3e2618,
-  stone: 0x6e6a7c,
-  stoneLight: 0x8c88a0,
-  stoneDark: 0x4a4658,
-  mortar: 0x2a2736,
-  wood: 0xa0683a,
-  woodLight: 0xc48a4e,
-  woodDark: 0x6a4024,
-  outline: 0x24160e,
-  leaf: 0x3f7a45,
-  leafLight: 0x5c9a52,
-  leafDark: 0x24452e,
-  bark: 0x5a3a24,
-  banner: 0x3f6fd8,
-  bannerDark: 0x2a4a9a,
-  gold: 0xf2c94c,
-  pole: 0xc8c8d0,
-  ink: 0x14121f,
-  paper: 0xf4ecd8,
-  paperShade: 0xb9a68c,
-  heart: 0xe04050,
-  heartLight: 0xff8a96,
-  heartDark: 0x5a1020,
-} as const;
 
 /** Bộ sinh số ngẫu nhiên có hạt giống (mulberry32): cùng seed => cùng dãy số. */
 function seeded(seed: number) {
@@ -128,49 +86,49 @@ function disc(img: PixelImage, cx: number, cy: number, r: number, fill: number, 
 // ============================================================================
 const T = 16;
 
-/** Đất có cỏ: mép cỏ lởm chởm ngẫu nhiên, bên dưới là đất lốm đốm. */
-function groundTop(seed: number) {
+/** Mặt đất: lớp phủ (cỏ / tuyết) mép lởm chởm ngẫu nhiên, bên dưới là đất lốm đốm. */
+function groundTop(p: Palette, seed: number) {
   const img = createImage(T, T);
   const rand = seeded(seed);
-  dirtNoise(img, 0, rand);
+  soilNoise(img, p, 0, rand);
   for (let x = 0; x < T; x++) {
-    const tip = rand() < 0.45 ? 0 : 1; // ngọn cỏ cao thấp xen kẽ
-    const depth = 4 + (rand() < 0.35 ? 1 : 0); // lớp cỏ dày 4-5 pixel
+    const tip = rand() < 0.45 ? 0 : 1; // ngọn cỏ / mép tuyết cao thấp xen kẽ
+    const depth = 4 + (rand() < 0.35 ? 1 : 0); // lớp phủ dày 4-5 pixel
     for (let y = 0; y < tip; y++) setPixel(img, x, y, 0, 0);
-    setPixel(img, x, tip, PALETTE.grassLight);
-    for (let y = tip + 1; y < depth; y++) setPixel(img, x, y, rand() < 0.25 ? PALETTE.grassLight : PALETTE.grass);
-    setPixel(img, x, depth, PALETTE.grassDark); // bóng cỏ đổ xuống đất
-    if (rand() < 0.3) setPixel(img, x, depth + 1, PALETTE.grassDark); // rễ cỏ thòng xuống
+    setPixel(img, x, tip, p.surfaceLight);
+    for (let y = tip + 1; y < depth; y++) setPixel(img, x, y, rand() < 0.25 ? p.surfaceLight : p.surface);
+    setPixel(img, x, depth, p.surfaceDark); // bóng của lớp phủ đổ xuống đất
+    if (rand() < 0.3) setPixel(img, x, depth + 1, p.surfaceDark); // rễ cỏ / tuyết chảy thòng xuống
   }
   return img;
 }
 
-/** Đất lốm đốm: nền nâu + chấm sáng/tối + thỉnh thoảng một viên sỏi. */
-function dirtNoise(img: PixelImage, fromY: number, rand: () => number) {
+/** Đất lốm đốm: nền + chấm sáng/tối + thỉnh thoảng một viên sỏi. */
+function soilNoise(img: PixelImage, p: Palette, fromY: number, rand: () => number) {
   for (let y = fromY; y < T; y++) {
     for (let x = 0; x < T; x++) {
       const r = rand();
-      setPixel(img, x, y, r < 0.12 ? PALETTE.dirtDark : r < 0.18 ? PALETTE.dirtLight : r < 0.2 ? PALETTE.dirtDeep : PALETTE.dirt);
+      setPixel(img, x, y, r < 0.12 ? p.soilDark : r < 0.18 ? p.soilLight : r < 0.2 ? p.soilDeep : p.soil);
     }
   }
   for (let i = 0; i < 2; i++) {
     const px = Math.floor(rand() * (T - 2));
     const py = fromY + 4 + Math.floor(rand() * (T - fromY - 6));
-    fillRect(img, px, py, 2, 2, PALETTE.stoneDark);
-    setPixel(img, px, py, PALETTE.stoneLight);
+    fillRect(img, px, py, 2, 2, p.stoneDark);
+    setPixel(img, px, py, p.stoneLight);
   }
 }
 
-function ground(seed: number) {
+function ground(p: Palette, seed: number) {
   const img = createImage(T, T);
-  dirtNoise(img, 0, seeded(seed));
+  soilNoise(img, p, 0, seeded(seed));
   return img;
 }
 
 /** Gạch đá: 2 hàng viên gạch so le, mỗi viên sáng ở mép trên-trái, tối ở mép dưới-phải. */
-function brick() {
+function brick(p: Palette) {
   const img = createImage(T, T);
-  fillRect(img, 0, 0, T, T, PALETTE.mortar);
+  fillRect(img, 0, 0, T, T, p.mortar);
   const rows = [
     { y: 0, offset: 0 },
     { y: 8, offset: 4 },
@@ -180,47 +138,47 @@ function brick() {
       const x0 = Math.max(0, bx + 1);
       const x1 = Math.min(T - 1, bx + 7);
       if (x1 <= x0) continue;
-      fillRect(img, x0, y + 1, x1 - x0 + 1, 6, PALETTE.stone);
-      fillRect(img, x0, y + 1, x1 - x0 + 1, 1, PALETTE.stoneLight);
-      fillRect(img, x0, y + 1, 1, 6, PALETTE.stoneLight);
-      fillRect(img, x0, y + 6, x1 - x0 + 1, 1, PALETTE.stoneDark);
-      fillRect(img, x1, y + 1, 1, 6, PALETTE.stoneDark);
+      fillRect(img, x0, y + 1, x1 - x0 + 1, 6, p.stone);
+      fillRect(img, x0, y + 1, x1 - x0 + 1, 1, p.stoneLight);
+      fillRect(img, x0, y + 1, 1, 6, p.stoneLight);
+      fillRect(img, x0, y + 6, x1 - x0 + 1, 1, p.stoneDark);
+      fillRect(img, x1, y + 1, 1, 6, p.stoneDark);
     }
   }
   return img;
 }
 
 /** Thùng gỗ: khung viền tối, ván ngang, thanh chéo, đinh ở 4 góc. */
-function crate() {
+function crate(p: Palette) {
   const img = createImage(T, T);
-  fillRect(img, 0, 0, T, T, PALETTE.outline);
-  fillRect(img, 1, 1, T - 2, T - 2, PALETTE.woodDark);
-  fillRect(img, 2, 2, T - 4, T - 4, PALETTE.wood);
-  for (const y of [5, 10]) fillRect(img, 2, y, T - 4, 1, PALETTE.woodDark);
+  fillRect(img, 0, 0, T, T, p.outline);
+  fillRect(img, 1, 1, T - 2, T - 2, p.woodDark);
+  fillRect(img, 2, 2, T - 4, T - 4, p.wood);
+  for (const y of [5, 10]) fillRect(img, 2, y, T - 4, 1, p.woodDark);
   for (let i = 2; i < T - 2; i++) {
-    setPixel(img, i, T - 1 - i, PALETTE.woodLight);
-    setPixel(img, i, T - i, PALETTE.woodDark);
+    setPixel(img, i, T - 1 - i, p.woodLight);
+    setPixel(img, i, T - i, p.woodDark);
   }
-  for (const [x, y] of [[2, 2], [T - 3, 2], [2, T - 3], [T - 3, T - 3]]) setPixel(img, x, y, PALETTE.stoneLight);
+  for (const [x, y] of [[2, 2], [T - 3, 2], [2, T - 3], [T - 3, T - 3]]) setPixel(img, x, y, p.stoneLight);
   return img;
 }
 
-/** Cầu gỗ một chiều: một tấm ván mỏng ở trên cùng + hai thanh chống, phần dưới trống. */
-function bridge() {
+/** Cầu một chiều: một tấm ván mỏng ở trên cùng + hai thanh chống, phần dưới trống. */
+function bridge(p: Palette) {
   const img = createImage(T, T);
-  fillRect(img, 0, 0, T, 5, PALETTE.outline);
-  fillRect(img, 0, 1, T, 3, PALETTE.wood);
-  fillRect(img, 0, 1, T, 1, PALETTE.woodLight);
-  for (const x of [4, 11]) setPixel(img, x, 2, PALETTE.woodDark);
+  fillRect(img, 0, 0, T, 5, p.outline);
+  fillRect(img, 0, 1, T, 3, p.wood);
+  fillRect(img, 0, 1, T, 1, p.woodLight);
+  for (const x of [4, 11]) setPixel(img, x, 2, p.woodDark);
   for (const x of [2, 13]) {
-    fillRect(img, x, 5, 1, 4, PALETTE.outline);
-    setPixel(img, x + (x < 8 ? 1 : -1), 5, PALETTE.outline);
+    fillRect(img, x, 5, 1, 4, p.outline);
+    setPixel(img, x + (x < 8 ? 1 : -1), 5, p.outline);
   }
   return img;
 }
 
-/** Bụi cây thấp: nửa vòm lá, đốm sáng phía trên. */
-function bush(seed: number) {
+/** Bụi cây thấp (bảng băng: gò tuyết): nửa vòm, đốm sáng phía trên. */
+function bush(p: Palette, seed: number) {
   const img = createImage(T, T);
   const rand = seeded(seed);
   for (let y = 0; y < T; y++) {
@@ -228,32 +186,32 @@ function bush(seed: number) {
       const d = Math.hypot((x + 0.5 - 8) / 8, (y + 0.5 - 16) / 8);
       if (d > 1) continue;
       const edge = d > 0.86;
-      setPixel(img, x, y, edge ? PALETTE.leafDark : rand() < 0.3 && y < 12 ? PALETTE.leafLight : PALETTE.leaf);
+      setPixel(img, x, y, edge ? p.foliageDark : rand() < 0.3 && y < 12 ? p.foliageLight : p.foliage);
     }
   }
   return img;
 }
 
 /** Hàng rào gỗ: 2 cọc + 2 thanh ngang. */
-function fence() {
+function fence(p: Palette) {
   const img = createImage(T, T);
   for (const y of [7, 11]) {
-    fillRect(img, 0, y - 1, T, 3, PALETTE.outline);
-    fillRect(img, 0, y, T, 1, PALETTE.wood);
+    fillRect(img, 0, y - 1, T, 3, p.outline);
+    fillRect(img, 0, y, T, 1, p.wood);
   }
   for (const x of [2, 12]) {
-    fillRect(img, x - 1, 3, 4, 13, PALETTE.outline);
-    fillRect(img, x, 4, 2, 12, PALETTE.wood);
-    setPixel(img, x, 4, PALETTE.woodLight);
+    fillRect(img, x - 1, 3, 4, 13, p.outline);
+    fillRect(img, x, 4, 2, 12, p.wood);
+    setPixel(img, x, 4, p.woodLight);
   }
   return img;
 }
 
-/** Cây thông cao 2 ô: 3 tầng lá tam giác chồng lên nhau + thân. */
-function pine(seed: number) {
+/** Cây thông cao 2 ô (bảng băng: cây băng): 3 tầng tán tam giác chồng lên nhau + thân. */
+function pine(p: Palette, seed: number) {
   const img = createImage(T, T * 2);
   const rand = seeded(seed);
-  fillRect(img, 7, 24, 2, 8, PALETTE.bark);
+  fillRect(img, 7, 24, 2, 8, p.trunk);
   const tiers = [
     { top: 2, bottom: 12, half: 4 },
     { top: 8, bottom: 19, half: 6 },
@@ -264,41 +222,67 @@ function pine(seed: number) {
       const w = Math.round(((y - top) / (bottom - top)) * half);
       for (let x = 8 - w; x < 8 + w; x++) {
         const edge = x === 8 - w || x === 8 + w - 1 || y === bottom - 1;
-        setPixel(img, x, y, edge ? PALETTE.leafDark : x < 8 && rand() < 0.35 ? PALETTE.leafLight : PALETTE.leaf);
+        setPixel(img, x, y, edge ? p.foliageDark : x < 8 && rand() < 0.35 ? p.foliageLight : p.foliage);
       }
     }
   }
   return img;
 }
 
-/** Cờ hiệu cao 2 ô: cột + lá cờ xanh có viền vàng (KHÔNG dùng đỏ: trong game đỏ = đòn không đỡ được). */
-function banner() {
+/** Cờ hiệu cao 2 ô: cột + lá cờ có huy hiệu vàng. */
+function banner(p: Palette) {
   const img = createImage(T, T * 2);
-  fillRect(img, 3, 2, 2, 30, PALETTE.pole);
-  setPixel(img, 3, 1, PALETTE.gold);
-  setPixel(img, 4, 1, PALETTE.gold);
+  fillRect(img, 3, 2, 2, 30, p.pole);
+  setPixel(img, 3, 1, p.gold);
+  setPixel(img, 4, 1, p.gold);
   for (let y = 4; y < 16; y++) {
     const w = y < 13 ? 10 : 10 - (y - 12) * 3; // đuôi cờ xẻ chữ V
-    for (let x = 5; x < 5 + w; x++) setPixel(img, x, y, x === 5 + w - 1 || y === 4 ? PALETTE.bannerDark : PALETTE.banner);
+    for (let x = 5; x < 5 + w; x++) setPixel(img, x, y, x === 5 + w - 1 || y === 4 ? p.flagDark : p.flag);
   }
-  fillRect(img, 8, 8, 3, 3, PALETTE.gold);
+  fillRect(img, 8, 8, 3, 3, p.gold);
+  return img;
+}
+
+/**
+ * Cụm pha lê: 3 tinh thể nhọn mọc từ đất. Nửa trái sáng, nửa phải tối, viền đậm:
+ * cách tô đơn giản nhất để khối có vẻ "có ánh sáng chiếu từ trái".
+ */
+function crystal(p: Palette) {
+  const img = createImage(T, T);
+  const shards = [
+    { cx: 4.5, top: 7, half: 2 },
+    { cx: 12, top: 9, half: 2 },
+    { cx: 8, top: 1, half: 3 }, // tinh thể cao nhất vẽ sau cùng => nằm đè phía trước
+  ];
+  for (const { cx, top, half } of shards) {
+    for (let y = top; y < T; y++) {
+      const w = Math.min(half, (y - top) / 1.5 + 0.5); // đầu nhọn, nở dần rồi thẳng đứng
+      const left = Math.floor(cx - w);
+      const right = Math.ceil(cx + w) - 1;
+      for (let x = left; x <= right; x++) {
+        const edge = x === left || x === right || y === T - 1;
+        setPixel(img, x, y, edge ? p.crystalDark : x < cx ? p.crystalLight : p.crystal);
+      }
+    }
+  }
   return img;
 }
 
 /** Bộ gạch: mọi hình 16×16 xếp một hàng, cây và cờ (16×32) xếp hàng dưới. */
-export function makeTileset(): PixelSheet {
+export function makeTileset(p: Palette): PixelSheet {
   const parts: [string, PixelImage][] = [
-    ['ground_top', groundTop(11)],
-    ['ground', ground(23)],
-    ['brick', brick()],
-    ['crate', crate()],
-    ['bridge', bridge()],
-    ['bush', bush(5)],
-    ['fence', fence()],
+    ['ground_top', groundTop(p, 11)],
+    ['ground', ground(p, 23)],
+    ['brick', brick(p)],
+    ['crate', crate(p)],
+    ['bridge', bridge(p)],
+    ['bush', bush(p, 5)],
+    ['fence', fence(p)],
+    ['crystal', crystal(p)],
   ];
   const tall: [string, PixelImage][] = [
-    ['tree', pine(7)],
-    ['banner', banner()],
+    ['tree', pine(p, 7)],
+    ['banner', banner(p)],
   ];
   const sheet = createImage(parts.length * T, T + T * 2);
   const frames: Record<string, FrameRect> = {};
@@ -316,17 +300,6 @@ export function makeTileset(): PixelSheet {
 // ============================================================================
 // Nền nhiều lớp. Các lớp núi/rừng/sao lặp lại theo chiều ngang: mép trái khớp mép phải.
 // ============================================================================
-
-/** Các mốc màu trời từ đỉnh màn hình (0) xuống đáy (1): đêm => tím => hồng => cam ở chân trời. */
-const SKY_STOPS: [number, number][] = [
-  [0, 0x0f1029],
-  [0.28, 0x221d4d],
-  [0.48, 0x43296a],
-  [0.62, 0x7a3a74],
-  [0.72, 0xb8566f],
-  [0.8, 0xe07f6c],
-  [1, 0xf4a873],
-];
 const SKY_BANDS = 14;
 
 function mix(a: number, b: number, t: number) {
@@ -334,51 +307,51 @@ function mix(a: number, b: number, t: number) {
   return (ch(16) << 16) | (ch(8) << 8) | ch(0);
 }
 
-function skyColor(t: number) {
-  for (let i = 1; i < SKY_STOPS.length; i++) {
-    const [t0, c0] = SKY_STOPS[i - 1];
-    const [t1, c1] = SKY_STOPS[i];
+function skyColor(stops: [number, number][], t: number) {
+  for (let i = 1; i < stops.length; i++) {
+    const [t0, c0] = stops[i - 1];
+    const [t1, c1] = stops[i];
     if (t <= t1) return mix(c0, c1, (t - t0) / (t1 - t0));
   }
-  return SKY_STOPS[SKY_STOPS.length - 1][1];
+  return stops[stops.length - 1][1];
 }
 
 /**
- * Bầu trời: ảnh rộng 1 pixel, game kéo giãn ngang cho phủ màn hình.
+ * Bầu trời / vòm hang: ảnh rộng 1 pixel, game kéo giãn ngang cho phủ màn hình.
  * Pixel art không chuyển màu mượt mà chia thành từng DẢI màu; cuối mỗi dải xen kẽ hàng màu của dải sau
  * (dithering) để mắt thấy chuyển màu mềm hơn mà vẫn giữ chất pixel.
  */
-export function makeSky(height: number): PixelImage {
+export function makeSky(p: Palette, height: number): PixelImage {
   const img = createImage(1, height);
   for (let y = 0; y < height; y++) {
     const pos = (y / (height - 1)) * (SKY_BANDS - 1);
     const band = Math.floor(pos);
     const useNext = pos - band > 0.7 && y % 2 === 0;
-    setPixel(img, 0, y, skyColor((band + (useNext ? 1 : 0)) / (SKY_BANDS - 1)));
+    setPixel(img, 0, y, skyColor(p.sky, (band + (useNext ? 1 : 0)) / (SKY_BANDS - 1)));
   }
   return img;
 }
 
 /** Trăng tròn có vài vết rỗ. */
-export function makeMoon(): PixelImage {
+export function makeMoon(p: Palette): PixelImage {
   const img = createImage(24, 24);
-  disc(img, 12, 12, 11, PALETTE.moon, PALETTE.moonShade);
-  for (const [x, y, r] of [[8, 9, 2], [15, 14, 3], [11, 17, 1.5]]) disc(img, x, y, r, PALETTE.moonShade, PALETTE.moonShade);
+  disc(img, 12, 12, 11, p.moon, p.moonShade);
+  for (const [x, y, r] of [[8, 9, 2], [15, 14, 3], [11, 17, 1.5]]) disc(img, x, y, r, p.moonShade, p.moonShade);
   return img;
 }
 
-/** Sao: đa số là chấm mờ 1 pixel, vài ngôi sáng hình dấu cộng. */
-export function makeStars(width: number, height: number): PixelImage {
+/** Sao (bảng băng: đốm băng lấp lánh trong hang): đa số là chấm mờ 1 pixel, vài đốm sáng hình dấu cộng. */
+export function makeStars(p: Palette, width: number, height: number): PixelImage {
   const img = createImage(width, height);
   const rand = seeded(17);
   for (let i = 0; i < 46; i++) {
     const x = Math.floor(rand() * width);
     const y = Math.floor(rand() * height * rand()); // dồn nhiều sao lên cao, gần chân trời ít sao
     if (rand() < 0.15) {
-      setPixel(img, x, y, PALETTE.starBright);
-      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) setPixel(img, (x + dx + width) % width, y + dy, PALETTE.star);
+      setPixel(img, x, y, p.starBright);
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) setPixel(img, (x + dx + width) % width, y + dy, p.star);
     } else {
-      setPixel(img, x, y, rand() < 0.3 ? PALETTE.starBright : PALETTE.star);
+      setPixel(img, x, y, rand() < 0.3 ? p.starBright : p.star);
     }
   }
   return img;
@@ -402,24 +375,27 @@ function ridge(width: number, rand: () => number, base: number, spread: number, 
   return heights;
 }
 
-/** Núi xa: tím đậm hơn trời; sườn dốc xuống bên phải (hướng mặt trời lặn) có viền sáng dày hơn. */
-export function makeMountains(width: number, height: number): PixelImage {
+/** Núi xa (bảng băng: vách băng xa): sườn dốc xuống bên phải có viền sáng dày hơn, như được chiếu từ bên đó. */
+export function makeMountains(p: Palette, width: number, height: number): PixelImage {
   const img = createImage(width, height);
   const h = ridge(width, seeded(3), height * 0.45, height * 1.1, 0.62);
   for (let x = 0; x < width; x++) {
     const top = Math.max(0, Math.round(height - h[x]));
     const lit = h[x + 1] < h[x];
-    for (let y = top; y < height; y++) setPixel(img, x, y, y < top + (lit ? 3 : 1) ? PALETTE.mountainLight : PALETTE.mountain);
+    for (let y = top; y < height; y++) setPixel(img, x, y, y < top + (lit ? 3 : 1) ? p.farLight : p.far);
   }
   return img;
 }
 
-/** Rừng thông xa: hàng cây tam giác cao thấp khác nhau, phần dưới đặc (chân rừng che kín đáy hố). */
-export function makeForest(width: number, height: number): PixelImage {
+/**
+ * Rừng thông xa (bảng băng: rừng gai băng): hàng tam giác cao thấp khác nhau, phần dưới đặc
+ * (chân rừng che kín đáy hố). Lật ngược ảnh này là thành trần hang treo đầy chông.
+ */
+export function makeForest(p: Palette, width: number, height: number): PixelImage {
   const img = createImage(width, height);
   const rand = seeded(9);
   const solidFrom = height - 12;
-  fillRect(img, 0, solidFrom, width, height - solidFrom, PALETTE.forest);
+  fillRect(img, 0, solidFrom, width, height - solidFrom, p.near);
   for (let cx = 4; cx < width; cx += 9 + Math.floor(rand() * 7)) {
     const treeH = 16 + Math.floor(rand() * 20);
     const half = 5 + Math.floor(rand() * 3);
@@ -428,10 +404,17 @@ export function makeForest(width: number, height: number): PixelImage {
       const w = Math.round(((y - top) / treeH) * half);
       for (let x = cx - w; x <= cx + w; x++) {
         const wrapped = (x + width) % width; // tràn mép phải thì vẽ tiếp ở mép trái => lặp liền mạch
-        setPixel(img, wrapped, y, y < top + 2 || x === cx - w ? PALETTE.forestLight : PALETTE.forest);
+        setPixel(img, wrapped, y, y < top + 2 || x === cx - w ? p.nearLight : p.near);
       }
     }
   }
+  return img;
+}
+
+/** Hạt 1×1 màu trắng: hạt bụi băng / tuyết rơi. Màu từng hạt do game tô (tint) lúc phát hạt. */
+export function makeMote(): PixelImage {
+  const img = createImage(1, 1);
+  setPixel(img, 0, 0, 0xffffff);
   return img;
 }
 
@@ -448,16 +431,16 @@ function ring16(r: number, fill: number, outline: number) {
   return img;
 }
 
-function line16(length: number) {
+function line16(p: Palette, length: number) {
   const img = createImage(T, T);
   const x0 = Math.floor((T - length) / 2);
-  fillRect(img, x0, 7, length, 2, PALETTE.paper);
-  setPixel(img, x0 + length - 1, 7, PALETTE.paperShade);
+  fillRect(img, x0, 7, length, 2, p.paper);
+  setPixel(img, x0 + length - 1, 7, p.paperShade);
   return img;
 }
 
 /** Trái tim kiểu cổ điển 16×16. */
-function heart16() {
+function heart16(p: Palette) {
   const shape = [
     '................',
     '................',
@@ -476,29 +459,29 @@ function heart16() {
     '................',
     '................',
   ];
-  const colors: Record<string, number> = { X: PALETTE.heartDark, H: PALETTE.heart, L: PALETTE.heartLight };
+  const colors: Record<string, number> = { X: p.heartDark, H: p.heart, L: p.heartLight };
   const img = createImage(T, T);
   shape.forEach((row, y) => [...row].forEach((ch, x) => colors[ch] !== undefined && setPixel(img, x, y, colors[ch])));
   return img;
 }
 
-function orb16(filled: boolean) {
+function orb16(p: Palette, filled: boolean) {
   const img = createImage(T, T);
-  disc(img, 8, 8, 5.5, filled ? PALETTE.gold : PALETTE.ink, PALETTE.paper);
-  if (filled) setPixel(img, 6, 6, PALETTE.paper); // đốm sáng
+  disc(img, 8, 8, 5.5, filled ? p.gold : p.ink, p.paper);
+  if (filled) setPixel(img, 6, 6, p.paper); // đốm sáng
   return img;
 }
 
 /** Hiệu ứng + trái tim + ô Qi, tên frame trùng với bộ Scribble để code hiệu ứng dùng chung. */
-export function makeFxSheet(): PixelSheet {
+export function makeFxSheet(p: Palette): PixelSheet {
   const parts: [string, PixelImage][] = [
-    ['effect_blast', ring16(5, PALETTE.paper, PALETTE.paperShade)],
-    ['effect_blastLarge', ring16(7.5, PALETTE.paper, PALETTE.paperShade)],
-    ['effect_shot', line16(8)],
-    ['effect_shotLarge', line16(15)],
-    ['heart', heart16()],
-    ['orb_empty', orb16(false)],
-    ['orb_full', orb16(true)],
+    ['effect_blast', ring16(5, p.paper, p.paperShade)],
+    ['effect_blastLarge', ring16(7.5, p.paper, p.paperShade)],
+    ['effect_shot', line16(p, 8)],
+    ['effect_shotLarge', line16(p, 15)],
+    ['heart', heart16(p)],
+    ['orb_empty', orb16(p, false)],
+    ['orb_full', orb16(p, true)],
   ];
   const sheet = createImage(parts.length * FX, FX);
   const frames: Record<string, FrameRect> = {};

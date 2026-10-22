@@ -4,8 +4,15 @@ import type { PlayerLook } from '../looks/PlayerLook';
 import type { EnemyLook } from '../looks/EnemyLook';
 import type { FxStyle } from '../combat/fxStyle';
 import type { SpecialDef } from '../combat/specials';
+import type { EnemyStats } from '../entities/enemyStats';
 
-export type ThemeId = 'scribble' | 'pixel';
+export type ThemeId = 'scribble' | 'pixel' | 'ice';
+
+/** Một loại kẻ địch trong một chế độ chơi: chỉ số (luật chơi) + bộ da (phần nhìn). */
+export interface EnemyKind {
+  stats: EnemyStats;
+  createLook(scene: Phaser.Scene, x: number, feetY: number): EnemyLook;
+}
 
 /** Đấu trường boss (xem LEVEL_1_ARENA). */
 export interface ArenaDef {
@@ -48,7 +55,8 @@ export interface Theme {
   fx: FxStyle;
   hud: HudStyle;
   special: SpecialDef;
+  /** Ký tự trên bản đồ => loại kẻ địch, vd. { E: lính, M: huyết quái }. Thêm loại = thêm một dòng. */
+  enemies: Record<string, EnemyKind>;
   createBackground(scene: Phaser.Scene, level: BuiltLevel): void;
   createPlayerLook(scene: Phaser.Scene, x: number, feetY: number): PlayerLook;
-  createEnemyLook(scene: Phaser.Scene, x: number, feetY: number): EnemyLook;
 }

@@ -1,11 +1,12 @@
 import { SCRIBBLE_THEME } from './scribble';
-import { PIXEL_THEME } from './pixel';
+import { PIXEL_THEME } from './pixel/forest';
+import { ICE_THEME } from './pixel/iceCave';
 import type { Theme, ThemeId } from './types';
 
 export type { Theme, ThemeId } from './types';
 
-/** Các chế độ chơi, theo thứ tự hiện trên màn hình chọn. */
-export const THEME_LIST: Theme[] = [SCRIBBLE_THEME, PIXEL_THEME];
+/** Các chế độ chơi, theo thứ tự hiện trên màn hình chọn. Thêm chế độ = viết một theme rồi thêm vào đây. */
+export const THEME_LIST: Theme[] = [SCRIBBLE_THEME, PIXEL_THEME, ICE_THEME];
 
 /** Tìm theme theo id; id lạ hoặc không có thì dùng chế độ gốc. */
 export function getTheme(id: ThemeId | undefined): Theme {

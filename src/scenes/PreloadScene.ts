@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { ATLAS } from '../config';
 import { ARROW_TEXTURE } from '../combat/arrows';
 import { THEME_LIST } from '../themes';
-import { createPixelTextures, PX } from '../themes/pixel/textures';
+import { CHARACTER_TEXTURES, createPixelTextures } from '../themes/pixel/textures';
 import { VI_TEXT } from '../ui/textStyle';
 import type { GameSceneData } from './GameScene';
 
@@ -34,8 +34,10 @@ export class PreloadScene extends Phaser.Scene {
 
     // Sprite sheet + JSON định dạng Aseprite: vừa là atlas (vị trí từng khung), vừa có thời lượng từng khung
     // và các TAG (idle, walk, attack01...) = tên các animation. Tạo bằng tools/aseprite-grid-to-json.mjs.
-    this.load.aseprite(PX.soldier, 'assets/characters/soldier/soldier.png', 'assets/characters/soldier/soldier.json');
-    this.load.aseprite(PX.orc, 'assets/characters/orc/orc.png', 'assets/characters/orc/orc.json');
+    // Mỗi nhân vật một thư mục: assets/characters/<tên>/<tên>.png + .json
+    for (const name of Object.values(CHARACTER_TEXTURES)) {
+      this.load.aseprite(name, `assets/characters/${name}/${name}.png`, `assets/characters/${name}/${name}.json`);
+    }
     this.load.image(ARROW_TEXTURE, 'assets/projectiles/arrow.png');
   }
 

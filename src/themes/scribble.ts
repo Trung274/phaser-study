@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { ATLAS } from '../config';
 import { SCRIBBLE_FX } from '../combat/fxStyle';
 import { TALISMAN_SPECIAL } from '../combat/specials';
+import { GRUNT } from '../entities/enemyStats';
 import { LEVEL_1, LEVEL_1_ARENA } from '../level/level1';
 import type { BuiltLevel } from '../level/buildLevel';
 import { ScribblePlayerLook } from '../looks/ScribblePlayerLook';
@@ -69,7 +70,9 @@ export const SCRIBBLE_THEME: Theme = {
     corner: 14,
   },
   special: TALISMAN_SPECIAL,
+  enemies: {
+    E: { stats: GRUNT, createLook: (scene, x, feetY) => new ScribbleEnemyLook(scene, x, feetY) }, // lính giáo
+  },
   createBackground: createScribbleBackground,
   createPlayerLook: (scene, x, feetY) => new ScribblePlayerLook(scene, x, feetY),
-  createEnemyLook: (scene, x, feetY) => new ScribbleEnemyLook(scene, x, feetY),
 };

@@ -3,6 +3,11 @@ import { lerpColor } from '../core/color';
 import { DANGER_RED, ENEMY_DEPTH, type EnemyLook, type EnemyView } from './EnemyLook';
 import { SpriteRig, type FrameRef, type PhasedAnim, type SpriteSheetDef } from './SpriteRig';
 
+/** Một đòn của kẻ địch: khung theo frame data + chỗ vũ khí ở khung cuối của pha lấy đà (để loé sáng báo trước). */
+export interface EnemyMoveAnim extends PhasedAnim {
+  tip: { x: number; y: number };
+}
+
 /** Bảng "trạng thái kẻ địch → khung hình" của một nhân vật sprite sheet (xem SpritePlayerDef). */
 export interface SpriteEnemyDef extends SpriteSheetDef {
   idle: string;
@@ -10,13 +15,11 @@ export interface SpriteEnemyDef extends SpriteSheetDef {
   hurt: string;
   death: string;
   /** Đòn thường / đòn đỏ: startup = lấy đà (windup), active = cú đánh (thrust), recovery = đứng hớ (recover). */
-  normal: PhasedAnim;
-  red: PhasedAnim;
+  normal: EnemyMoveAnim;
+  red: EnemyMoveAnim;
   /** Bị đỡ hoàn hảo: khựng lại. Bị phản đòn: ngã quỵ. */
   staggered: FrameRef;
   broken: FrameRef;
-  /** Chỗ vũ khí ở khung cuối của pha lấy đà, tính từ chân khi quay phải: chỗ loé sáng báo trước. */
-  weaponTip: { x: number; y: number };
 }
 
 const DEATH_LINGER = 300; // ms nằm lại sau khi hết animation chết, rồi mới mờ đi
@@ -24,8 +27,6 @@ const DEATH_FADE = 400;
 
 /** Bộ da sprite sheet của kẻ địch (Tiny RPG Orc...). */
 export class SpriteEnemyLook implements EnemyLook {
-  readonly weaponTip: { x: number; y: number };
-
   private readonly scene: Phaser.Scene;
   private readonly def: SpriteEnemyDef;
   private readonly rig: SpriteRig;
@@ -38,9 +39,12 @@ export class SpriteEnemyLook implements EnemyLook {
   constructor(scene: Phaser.Scene, x: number, feetY: number, def: SpriteEnemyDef) {
     this.scene = scene;
     this.def = def;
-    this.weaponTip = def.weaponTip;
     this.rig = new SpriteRig(scene, x, feetY, def, ENEMY_DEPTH);
     this.rig.loop(def.idle);
+  }
+
+  weaponTip(red: boolean) {
+    return red ? this.def.red.tip : this.def.normal.tip;
   }
 
   flash(color: number, ms: number) {

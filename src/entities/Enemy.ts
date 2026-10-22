@@ -8,58 +8,25 @@ import type { HitStop } from '../combat/HitStop';
 import type { Sfx } from '../audio/Sfx';
 import type { Player } from '../player/Player';
 import { DANGER_RED, type EnemyLook, type EnemyView } from '../looks/EnemyLook';
+import type { EnemyStats, ThrustDef } from './enemyStats';
 
 // ============================================================================
-// Lính thường: đi tuần, thấy người chơi thì đuổi, tới gần thì báo trước rồi đánh
-// (bộ Scribble: lính giáo; bộ Pixel: orc cầm rìu. Cùng một AI, khác bộ da)
+// Kẻ địch thường: đi tuần, thấy người chơi thì đuổi, tới gần thì báo trước rồi đánh.
+// Cùng một AI cho mọi loại; máu, tốc độ, các đòn lấy từ bảng EnemyStats (enemyStats.ts),
+// phần nhìn lấy từ bộ da (lính giáo, orc, quỷ, huyết quái...).
+// Các thông số dưới đây dùng chung cho mọi loại.
 // ============================================================================
-const MAX_HP = 40;                  // ~ một combo 3 nhát là hạ
-const PATROL_SPEED = 1.2 * TILE;
-const CHASE_SPEED = 2.6 * TILE;
 const ACCEL = 20 * TILE;
 const PATROL_RANGE = 3 * TILE;      // đi tuần quanh chỗ xuất hiện ±3 ô
 const PATROL_PAUSE = 700;           // ms đứng nghỉ mỗi lần quay đầu
 const DETECT_X = 6 * TILE;          // tầm nhìn ngang
 const DETECT_Y = 1.5 * TILE;        // tầm nhìn dọc: người chơi ở tầng khác thì không thấy
 const LOSE_INTEREST = 2000;         // ms mất dấu thì quay về đi tuần
-const ATTACK_RANGE = 1.5 * TILE;    // cách người chơi chừng này thì bắt đầu ra đòn
-
-/**
- * Một kiểu đánh, mô tả bằng dữ liệu (như COMBO của người chơi). Startup (windup) DÀI để người chơi kịp phản ứng.
- *   |------ windup: "!" + ngả người lấy đà ------|-- flash --|-- thrust --|------ recover: đứng hớ ------|
- */
-interface ThrustDef {
-  windup: number;      // ms lấy đà (gồm cả flash)
-  flashBefore: number; // ms cuối của windup: chớp sáng = "NGAY BÂY GIỜ"
-  thrust: number;      // ms vũ khí có hiệu lực
-  distance: number;    // lao tới bao xa khi đánh
-  recover: number;     // ms đứng hớ sau khi đánh: cửa sổ để người chơi phản công
-  damage: number;      // số tim
-  power: number;
-  hitStop: number;
-  unblockable: boolean;
-}
-
-const NORMAL_THRUST: ThrustDef = {
-  windup: 520, flashBefore: 130, thrust: 140, distance: 1.2 * TILE, recover: 520,
-  damage: 1, power: 0.6, hitStop: 90, unblockable: false,
-};
-
-/** Đòn đỏ: lấy đà lâu hơn (dễ thấy), lao xa hơn, đau gấp đôi, KHÔNG đỡ được; đổi lại đứng hớ rất lâu. */
-const RED_THRUST: ThrustDef = {
-  windup: 720, flashBefore: 170, thrust: 230, distance: 3 * TILE, recover: 850,
-  damage: 2, power: 0.9, hitStop: 110, unblockable: true,
-};
-const RED_CHANCE = 0.35;            // mỗi lần ra đòn có 35% là đòn đỏ
 
 const ATTACK_COOLDOWN = 600;
 const HURT_TIME = 300;              // ms choáng khi trúng đòn (hitstun)
 const STAGGER_TIME = 750;           // ms khựng lại khi bị đỡ hoàn hảo: phần thưởng cho người chơi
 const BROKEN_TIME = 1300;           // ms ngã quỵ khi bị phản đòn: phần thưởng còn lớn hơn
-const STRIKE_HITBOX = { x: 20, y: -100, w: 170, h: 75 }; // vùng vũ khí khi quay mặt sang PHẢI, tính từ chân
-
-const HITBOX_W = 60;
-const HITBOX_H = 112;
 const HP_BAR_W = 80;
 
 export type EnemyState = 'patrol' | 'chase' | 'windup' | 'attack' | 'recover' | 'hurt' | 'staggered' | 'broken' | 'dead';
@@ -74,6 +41,8 @@ export interface EnemyDeps {
   hitStop: HitStop;
   /** Ô tại (x, y) có phải nền đứng được không: dùng làm "cảm biến" mép vực. */
   isGroundAt: (x: number, y: number) => boolean;
+  /** Chỉ số của loại kẻ địch này (luật chơi). */
+  stats: EnemyStats;
   /** Bộ da: phần nhìn thấy của kẻ địch. */
   look: EnemyLook;
 }
@@ -81,7 +50,7 @@ export interface EnemyDeps {
 export class Enemy implements Hittable, Attacker {
   readonly hitbox: Phaser.GameObjects.Rectangle;
   readonly body: Phaser.Physics.Arcade.Body;
-  hp = MAX_HP;
+  hp: number;
   /** Đã chết và diễn xong hoạt cảnh: GameScene sẽ dọn đi. */
   gone = false;
   /** Các collider GameScene tạo cho kẻ địch này; dọn đi cùng lúc với kẻ địch. */
@@ -89,6 +58,7 @@ export class Enemy implements Hittable, Attacker {
 
   private readonly scene: Phaser.Scene;
   private readonly deps: EnemyDeps;
+  private readonly stats: EnemyStats;
   private readonly look: EnemyLook;
   private readonly fsm: StateMachine<EnemyState>;
   private readonly hpBarBg: Phaser.GameObjects.Rectangle;
@@ -105,17 +75,21 @@ export class Enemy implements Hittable, Attacker {
   private strikeConnected = false;
   private swingId = 0;
   private target: Player | null = null;
-  private move: ThrustDef = NORMAL_THRUST; // kiểu đánh đang ra (thường / đỏ)
+  private move: ThrustDef; // kiểu đánh đang ra (thường / đỏ)
   private afterimageTimer = 0;
 
   /** (x, feetY) là vị trí CHÂN. */
   constructor(scene: Phaser.Scene, x: number, feetY: number, deps: EnemyDeps) {
     this.scene = scene;
     this.deps = deps;
+    this.stats = deps.stats;
     this.look = deps.look;
     this.spawnX = x;
+    this.hp = this.stats.maxHp;
+    this.move = this.stats.normal;
 
-    this.hitbox = scene.add.rectangle(x, feetY - HITBOX_H / 2, HITBOX_W, HITBOX_H).setVisible(false);
+    const { w, h } = this.stats.body;
+    this.hitbox = scene.add.rectangle(x, feetY - h / 2, w, h).setVisible(false);
     scene.physics.add.existing(this.hitbox);
     this.body = this.hitbox.body as Phaser.Physics.Arcade.Body;
     this.body.setCollideWorldBounds(true);
@@ -159,7 +133,7 @@ export class Enemy implements Hittable, Attacker {
   /** Vũ khí đang có hiệu lực (và chưa trúng ai) thì trả về vùng gây sát thương. */
   activeStrike(): Strike | null {
     if (this.fsm.current !== 'attack' || this.strikeConnected) return null;
-    const hb = STRIKE_HITBOX;
+    const hb = this.move.hitbox;
     const x = this.facing > 0 ? this.body.center.x + hb.x : this.body.center.x - hb.x - hb.w;
     return {
       rect: new Phaser.Geom.Rectangle(x, this.body.bottom + hb.y, hb.w, hb.h),
@@ -180,7 +154,8 @@ export class Enemy implements Hittable, Attacker {
   /** Bị người chơi đỡ hoàn hảo: vũ khí bị hất ngược, lảo đảo lùi lại, hở người một lúc. */
   onParried(pushDirection: 1 | -1) {
     if (this.isDead) return;
-    this.body.setVelocity(pushDirection * 2.5 * TILE, -1.5 * TILE);
+    const k = this.stats.knockback;
+    this.body.setVelocity(pushDirection * 2.5 * TILE * k, -1.5 * TILE * k);
     this.look.flash(0xffffff, 80);
     this.fsm.transition('staggered', true);
   }
@@ -194,13 +169,14 @@ export class Enemy implements Hittable, Attacker {
     this.hp = Math.max(0, this.hp - damage);
     this.look.flash(0xffffff, 120);
     this.hpBarBg.setVisible(true);
-    this.hpBarFill.setVisible(true).setScale(this.hp / MAX_HP, 1);
+    this.hpBarFill.setVisible(true).setScale(this.hp / this.stats.maxHp, 1);
     if (this.hp === 0) {
       this.facing = pushDirection > 0 ? -1 : 1;
       this.fsm.transition('dead');
       return true;
     }
-    this.body.setVelocity(pushDirection * 4 * TILE, -3 * TILE);
+    const k = this.stats.knockback;
+    this.body.setVelocity(pushDirection * 4 * TILE * k, -3 * TILE * k);
     this.fsm.transition('broken', true);
     return false;
   }
@@ -211,7 +187,7 @@ export class Enemy implements Hittable, Attacker {
     this.hp = Math.max(0, this.hp - hit.damage);
     this.look.flash(0xffffff, 80);
     this.hpBarBg.setVisible(true);
-    this.hpBarFill.setVisible(true).setScale(this.hp / MAX_HP, 1);
+    this.hpBarFill.setVisible(true).setScale(this.hp / this.stats.maxHp, 1);
 
     if (this.hp === 0) {
       this.facing = hit.direction > 0 ? -1 : 1; // quay mặt về phía người vừa chém, ngã ngửa ra sau
@@ -224,9 +200,10 @@ export class Enemy implements Hittable, Attacker {
     const superArmor = this.move.unblockable && (this.fsm.current === 'windup' || this.fsm.current === 'attack');
     if (superArmor) return true;
 
-    // Giật lùi + nảy nhẹ; đòn càng nặng càng văng xa. Bị đánh thì bỏ dở đòn đang lấy đà (bị "ngắt")
+    // Giật lùi + nảy nhẹ; đòn càng nặng càng văng xa, con càng nặng càng ít văng. Bị đánh thì bỏ dở đòn đang lấy đà (bị "ngắt")
     const lerp = Phaser.Math.Linear;
-    this.body.setVelocity(hit.direction * lerp(2.2, 5, hit.power) * TILE, -lerp(1.5, 3.5, hit.power) * TILE);
+    const k = this.stats.knockback;
+    this.body.setVelocity(hit.direction * lerp(2.2, 5, hit.power) * TILE * k, -lerp(1.5, 3.5, hit.power) * TILE * k);
     this.loseTimer = LOSE_INTEREST; // bị đánh thì chắc chắn "để ý" người chơi
     this.fsm.transition('hurt', true);
     return true;
@@ -270,7 +247,7 @@ export class Enemy implements Hittable, Attacker {
   private blockedAhead(dir: 1 | -1) {
     if (dir > 0 ? this.body.blocked.right : this.body.blocked.left) return true;
     if (!this.body.blocked.down) return false;
-    const sensorX = this.body.center.x + dir * (HITBOX_W / 2 + 8);
+    const sensorX = this.body.center.x + dir * (this.stats.body.w / 2 + 8);
     return !this.deps.isGroundAt(sensorX, this.body.bottom + 8);
   }
 
@@ -302,7 +279,7 @@ export class Enemy implements Hittable, Attacker {
       return;
     }
     this.facing = this.patrolDir;
-    this.walk(this.patrolDir * PATROL_SPEED, delta);
+    this.walk(this.patrolDir * this.stats.patrolSpeed, delta);
   }
 
   private updateChase(delta: number) {
@@ -325,15 +302,16 @@ export class Enemy implements Hittable, Attacker {
     const dir: 1 | -1 = dx > 0 ? 1 : -1;
     if (Math.abs(dx) > 4) this.facing = dir;
 
-    if (Math.abs(dx) <= ATTACK_RANGE && Math.abs(dy) < TILE && this.cooldown <= 0 && this.body.blocked.down) {
+    const { attackRange, chaseSpeed } = this.stats;
+    if (Math.abs(dx) <= attackRange && Math.abs(dy) < TILE && this.cooldown <= 0 && this.body.blocked.down) {
       // Chọn kiểu đánh ngay lúc bắt đầu lấy đà: người chơi phải NHÌN để biết là đòn nào
-      this.move = Math.random() < RED_CHANCE ? RED_THRUST : NORMAL_THRUST;
+      this.move = Math.random() < this.stats.redChance ? this.stats.red : this.stats.normal;
       this.fsm.transition('windup');
       return;
     }
     // Tới đủ gần thì đứng chờ hồi chiêu; không đuổi theo xuống vực
-    const wantMove = Math.abs(dx) > ATTACK_RANGE * 0.8 && !this.blockedAhead(dir);
-    this.walk(wantMove ? dir * CHASE_SPEED : 0, delta);
+    const wantMove = Math.abs(dx) > attackRange * 0.8 && !this.blockedAhead(dir);
+    this.walk(wantMove ? dir * chaseSpeed : 0, delta);
   }
 
   private enterWindup() {
@@ -452,7 +430,7 @@ export class Enemy implements Hittable, Attacker {
 
   /** Vũ khí loé sáng ngay trước cú đánh. Chỗ loé do bộ da cho biết (mũi giáo, lưỡi rìu...). */
   private spawnWeaponGlint() {
-    const tip = this.look.weaponTip;
+    const tip = this.look.weaponTip(this.move.unblockable);
     const glint = this.scene.add
       .image(this.body.center.x + this.facing * tip.x, this.body.bottom + tip.y, fxStyle(this.scene).texture, 'effect_blast')
       .setScale(0.5)
@@ -465,7 +443,7 @@ export class Enemy implements Hittable, Attacker {
   private sync() {
     const frozen = this.deps.hitStop.active;
     const x = this.hitbox.x;
-    const feetY = this.hitbox.y + HITBOX_H / 2;
+    const feetY = this.hitbox.y + this.stats.body.h / 2;
     if (!frozen && !this.isDead) {
       this.hpBarBg.setPosition(x, feetY - 150);
       this.hpBarFill.setPosition(x - HP_BAR_W / 2, feetY - 150);
@@ -482,7 +460,7 @@ export class Enemy implements Hittable, Attacker {
       timeInState: this.fsm.timeInState,
       facing: this.facing,
       vx: this.body.velocity.x,
-      runRatio: this.body.velocity.x / CHASE_SPEED,
+      runRatio: this.body.velocity.x / this.stats.chaseSpeed,
       onGround: this.body.blocked.down,
       move: this.move,
       flashedBeforeThrust: this.flashedBeforeThrust,

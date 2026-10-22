@@ -104,7 +104,16 @@ export class UIScene extends Phaser.Scene {
     }
 
     this.debugText = this.add
-      .text(GAME_WIDTH - 24, 20, '', { ...VI_TEXT, fontFamily: 'monospace', fontSize: '22px', color: this.hud.text, align: 'right' })
+      .text(GAME_WIDTH - 24, 20, '', {
+        ...VI_TEXT,
+        fontFamily: 'monospace',
+        fontSize: '22px',
+        color: this.hud.text,
+        align: 'right',
+        // Viền cùng màu tấm nền HUD: đọc được cả khi đè lên trần gạch sáng màu
+        stroke: Phaser.Display.Color.IntegerToColor(this.hud.panel).rgba,
+        strokeThickness: 4,
+      })
       .setOrigin(1, 0)
       .setAlpha(0.85);
     this.createControlsBox(24, 112, controls(theme.special)); // ngay dưới hàng trái tim
